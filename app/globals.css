@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------
+   Veltr design system — warm cream paper, burnt-orange accent blocks.
+   Committed light palette: no dark-mode inversion, colors are explicit
+   so the page never borrows the host UA theme.
+------------------------------------------------------------------- */
+@theme {
+  /* Surfaces */
+  --color-cream: #f7f2e7;
+  --color-cream-deep: #efe6d4;
+  --color-paper: #fdfbf5;
+  --color-paper-edge: #f2ecdd;
+
+  /* Ink */
+  --color-ink: #1f1a14;
+  --color-ink-soft: #544838;
+  --color-ink-muted: #8b7c68;
+  --color-ink-faint: #b3a58f;
+
+  /* Rules */
+  --color-line: #e3d7c1;
+  --color-line-soft: #ede4d3;
+  --color-line-strong: #cfbfa3;
+
+  /* Accent — the same ink as body type. Emphasis comes from weight and
+     surface inversion rather than hue. */
+  --color-accent: #1f1a14; /* identical to --color-ink */
+  --color-accent-deep: #3a3128; /* hover lift on ink surfaces; emphasis text on cream */
+  --color-accent-dark: #12100b;
+  --color-accent-tint: #e9e2d4; /* secondary text on ink cards */
+  --color-accent-line: #c9bda8; /* underlines and hairlines on cream */
+
+  /* Alert — monochrome. The palette carries no hue of its own; urgency is
+     expressed by fill and contrast, not colour. Severity ranking lives in
+     SEVERITY_STYLES, which uses the ink scale directly. */
+  --color-alert: #1f1a14;
+  --color-alert-tint: #e4dbc7;
+
+  /* Type */
+  --font-display: var(--font-instrument-serif), Georgia, serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono-jb), ui-monospace, monospace;
+
+  /* Motion */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--color-cream);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Financial figures must align in columns. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono);
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background-color: var(--color-accent);
+    color: var(--color-paper);
+  }
+}
+
+@layer components {
+  /* Small-caps eyebrow label used above section headings. */
+  .eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-ink-muted);
+  }
+
+  .rule {
+    border-top: 1px solid var(--color-line);
+  }
+
+  /* Paper card — the default raised surface on cream. */
+  .card {
+    background-color: var(--color-paper);
+    border: 1px solid var(--color-line);
+    border-radius: 0.75rem;
+  }
+
+  /* Flame card — the orange accent block. */
+  .card-accent {
+    background-color: var(--color-accent);
+    color: var(--color-accent-tint);
+    border-radius: 0.75rem;
+  }
+
+  .link-underline {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+    text-decoration-color: var(--color-accent-line);
+    transition: text-decoration-color 160ms var(--ease-out-soft);
+  }
+  .link-underline:hover {
+    text-decoration-color: var(--color-accent);
+  }
+}
+
+/* Paper grain — a barely-there texture so large cream fields aren't flat. */
+.grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

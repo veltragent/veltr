@@ -1,0 +1,24 @@
+# Kept out of the build context: everything here either does not belong in an
+# image, or must never leave this machine.
+
+# Secrets. The build must fail for a missing variable rather than silently bake
+# one in — a key copied into a layer stays in that layer forever.
+.env
+.env.*
+
+# Runtime state: real Telegram chat ids and signed delegations. Belongs on the
+# mounted volume, never in the image.
+/data
+
+node_modules
+.next
+.git
+.vercel
+coverage
+*.tsbuildinfo
+
+# Development-only.
+/tests
+/scripts
+npm-debug.log*
+.DS_Store
