@@ -49,12 +49,17 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/next.config.ts ./next.config.ts
 
-# Owned by the unprivileged user Node's image already provides, so the volume is
-# writable without running as root.
 RUN mkdir -p /data && chown -R node:node /data /app
-USER node
 
-VOLUME ["/data"]
+# Stays root only long enough for the entrypoint to chown the mounted volume,
+# which does not exist until the container starts. The entrypoint then execs as
+# `node`, so the application itself never runs privileged.
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
+# No VOLUME instruction: Railway rejects one outright ("use Railway Volumes"),
+# and its own volume is attached at /data by the platform. On plain Docker,
+# mount it yourself:  docker run -v veltr-data:/data …
 EXPOSE 3000
 
 # The platform's health check should target this. It reports "degraded" and 503

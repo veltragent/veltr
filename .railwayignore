@@ -1,0 +1,21 @@
+# Never uploaded to Railway.
+#
+# `railway up` sends the working directory, so this is the last line of defence
+# between a local .env.local and a build log. The Dockerfile has its own
+# .dockerignore, but that only applies once the context has already been sent.
+
+.env
+.env.*
+
+# Runtime state: real Telegram chat ids and signed delegations. It belongs on the
+# mounted volume, written by the running service — never shipped with the build.
+/data
+
+node_modules
+.next
+.git
+.vercel
+coverage
+*.tsbuildinfo
+npm-debug.log*
+.DS_Store
