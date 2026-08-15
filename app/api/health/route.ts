@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { access, constants } from "node:fs/promises";
-import { dataDir } from "@/lib/paths";
-import { leaseHolder } from "@/lib/lease";
+import { healthReport } from "@/lib/health";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +8,13 @@ export const dynamic = "force-dynamic";
  *
  * Deliberately unauthenticated and deliberately thin: a health check runs every
  * few seconds, so it must not read the chain, call a provider, or spend
- * anything. It answers one question — is this process able to do its job — and
- * the only thing that can stop it is a state directory it cannot write to.
+ * anything. It answers one question — is this process able to do its job.
+ *
+ * Two things can say no. A state directory it cannot write to, which on a host
+ * with no mounted volume is the failure that loses every subscriber on the next
+ * deploy. And a background loop that has stopped reporting, which is the failure
+ * nothing outside the process could otherwise see: the port still answers and
+ * questions still get replies while alerts have silently stopped forever.
  *
  * It reports whether this instance holds the scheduler lease rather than
  * treating that as failure. A standby instance is healthy: it serves HTTP and
@@ -22,31 +25,6 @@ export const dynamic = "force-dynamic";
  * back.
  */
 export async function GET() {
-  const startedAt = Date.now();
-
-  let storage: "writable" | "unwritable" = "unwritable";
-  try {
-    await access(dataDir(), constants.W_OK);
-    storage = "writable";
-  } catch {
-    // Left as unwritable: on a host with no mounted volume this is the failure
-    // that loses every subscriber on the next deploy, and it should be loud.
-  }
-
-  const lease = await leaseHolder("scheduler").catch(() => null);
-  const schedulerHeld = Boolean(lease);
-
-  const healthy = storage === "writable";
-
-  return NextResponse.json(
-    {
-      status: healthy ? "ok" : "degraded",
-      storage,
-      // "standby" is a normal, correct state — not an error.
-      scheduler: schedulerHeld ? "running" : "standby",
-      uptimeSeconds: Math.round(process.uptime()),
-      checkedInMs: Date.now() - startedAt,
-    },
-    { status: healthy ? 200 : 503 }
-  );
+  const { httpStatus, body } = await healthReport();
+  return NextResponse.json(body, { status: httpStatus });
 }

@@ -10,6 +10,7 @@ import { acquireLease, keepLease, leaseHolder, INSTANCE_ID } from "./lease";
 import { kvAvailable } from "./kv";
 import { backupNow, describeCensus, restoreIfEmpty } from "./backup";
 import { notifyOwner } from "./owner";
+import { beat, classifyBoot, publishBeacon, stalledLoops, watchLoopHealth, BEACON_INTERVAL_MS, type LoopName } from "./heartbeat";
 
 /**
  * In-process background scheduler.
@@ -73,10 +74,12 @@ async function telegramLoop() {
   // message — Telegram stores it against the bot, not the conversation.
   const registered = await registerBotCommands();
   log(`telegram long-poll started (command menu ${registered ? "registered" : "not registered"})`);
+  watchLoopHealth("telegram");
 
   for (;;) {
     try {
       const result = await syncTelegram(25);
+      beat("telegram");
       if (result.added || result.removed) {
         log(`telegram: +${result.added} −${result.removed} (${result.subscribers} total)`);
       }
@@ -90,10 +93,12 @@ async function telegramLoop() {
 
 async function watchLoop() {
   log(`watcher started — every ${WATCH_INTERVAL_MS / 1000}s`);
+  watchLoopHealth("watch");
 
   for (;;) {
     try {
       const result = await runWatch();
+      beat("watch");
       if (result.changes.length > 0) {
         log(`detected ${result.changes.length} change(s):`, result.changes.map((c) => `${c.symbol} ${c.kind}`).join(", "));
         const delivery = await dispatchPending();
@@ -117,9 +122,11 @@ async function watchLoop() {
  */
 async function tokenWatchLoop() {
   log(`token watcher started — tick every ${TOKEN_WATCH_TICK_MS / 1000}s`);
+  watchLoopHealth("tokens");
 
   for (;;) {
     const report = await runWatchCycleSafely();
+    beat("tokens");
     if (report && (report.alerts > 0 || report.unresolved > 0)) {
       log(
         `[WATCHER] due=${report.due} tokens=${report.tokensFetched} alerts=${report.alerts} sent=${report.sent} failed=${report.failed} unresolved=${report.unresolved} suppressed=${report.suppressed}`
@@ -138,10 +145,12 @@ async function tokenWatchLoop() {
  */
 async function trackLoop() {
   log("track monitor started — tick every 5m");
+  watchLoopHealth("tracks");
 
   for (;;) {
     await new Promise((r) => setTimeout(r, TRACK_TICK_MS));
     const report = await runTrackCycleSafely();
+    beat("tracks");
     if (report && (report.changed > 0 || report.failed > 0)) {
       log(`[TRACK] due=${report.due} fetched=${report.fetched} changed=${report.changed} sent=${report.sent} failed=${report.failed}${report.paused ? ` paused=${report.paused}` : ""}`);
     }
@@ -151,10 +160,12 @@ async function trackLoop() {
 /** Recurring missions. Silent unless the figures a run observes actually move. */
 async function scheduleLoop() {
   log("mission scheduler started — tick every 5m");
+  watchLoopHealth("schedules");
 
   for (;;) {
     await new Promise((r) => setTimeout(r, SCHEDULE_TICK_MS));
     const report = await runScheduleCycleSafely();
+    beat("schedules");
     if (report && report.ran > 0) {
       log(`[SCHEDULE] due=${report.due} ran=${report.ran} changed=${report.changed} sent=${report.sent} failed=${report.failed}`);
     }
@@ -174,15 +185,62 @@ async function backupLoop() {
     return;
   }
   log(`state backups started — every ${BACKUP_TICK_MS / 60_000}m`);
+  watchLoopHealth("backups");
 
   for (;;) {
     const outcome = await backupNow();
+    beat("backups");
     if (outcome.ok) {
       log(`[BACKUP] ${describeCensus(outcome.counts)} — ${Math.round(outcome.bytes / 1024)}KB`);
     } else if (outcome.reason !== "unavailable") {
       log(`[BACKUP] not taken: ${outcome.reason}${outcome.detail ? ` (${outcome.detail})` : ""}`);
     }
     await new Promise((r) => setTimeout(r, BACKUP_TICK_MS));
+  }
+}
+
+/**
+ * Watches the other loops, and says this instance is alive.
+ *
+ * The stall check is the part that cannot be done from outside: a loop that has
+ * ended leaves a process that still serves HTTP, still answers, and reports
+ * healthy to anything that asks. The only place that failure is visible is in
+ * here, where the loops are supposed to be reporting.
+ *
+ * Reported once per episode. A stopped loop is stopped on every subsequent
+ * check, and a message each time would be a second runaway on top of the first.
+ */
+async function watchdogLoop() {
+  const reported = new Set<LoopName>();
+
+  for (;;) {
+    await new Promise((r) => setTimeout(r, BEACON_INTERVAL_MS));
+    await publishBeacon();
+
+    const stalled = stalledLoops();
+    const names = new Set(stalled.map((s) => s.loop));
+
+    // Recovered loops are forgotten, so a later stall is reported again.
+    for (const loop of reported) if (!names.has(loop)) reported.delete(loop);
+
+    const fresh = stalled.filter((s) => !reported.has(s.loop));
+    if (fresh.length === 0) continue;
+
+    for (const s of fresh) reported.add(s.loop);
+    const lines = fresh.map(
+      (s) => `  ${s.loop} — silent for ${Math.round(s.silentForMs / 60_000)}m (expected every ${Math.round(s.toleranceMs / 60_000)}m at worst)`
+    );
+    log(`STALLED: ${fresh.map((s) => s.loop).join(", ")}`);
+
+    void notifyOwner(
+      [
+        "⚠️ A Veltr background loop has stopped.",
+        "",
+        ...lines,
+        "",
+        "The process is still up and still answering — this is the failure no health check can see. A restart will clear it.",
+      ].join("\n")
+    ).catch(() => {});
   }
 }
 
@@ -298,6 +356,26 @@ export async function startScheduler(): Promise<void> {
     log("scheduler lease lost — a second instance is now driving. Stop this one.");
   });
 
+  // What this boot means. A beacon still warm from a different instance says
+  // the process it belonged to did not stop cleanly, and several of those in
+  // half an hour is a crash loop — which, from outside, looks like a service
+  // that is simply up, because between crashes it genuinely is.
+  const boot = await classifyBoot();
+  if (boot.kind === "restart" || boot.kind === "crash-loop") {
+    log(`${boot.kind}: replaced ${boot.replaced}, last seen ${Math.round(boot.agoMs / 1000)}s ago (${boot.countInWindow} in 30m)`);
+  }
+  if (boot.kind === "crash-loop") {
+    void notifyOwner(
+      [
+        "🔁 Veltr is restarting repeatedly.",
+        "",
+        `${boot.countInWindow} unclean restarts in the last 30 minutes — the previous instance was alive ${Math.round(boot.agoMs / 1000)}s ago.`,
+        "",
+        "Between crashes it answers normally, so uptime checks will not show this. Worth looking at the logs.",
+      ].join("\n")
+    ).catch(() => {});
+  }
+
   void telegramLoop();
   void watchLoop();
   void tokenWatchLoop();
@@ -305,4 +383,5 @@ export async function startScheduler(): Promise<void> {
   void scheduleLoop();
   void briefLoop();
   void backupLoop();
+  void watchdogLoop();
 }
