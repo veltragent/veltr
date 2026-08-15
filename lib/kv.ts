@@ -191,10 +191,21 @@ export async function kvRelease(name: string, holder: string): Promise<void> {
   await send(["EVAL", script, 1, key(name), holder]);
 }
 
-/** Who holds a lease right now, for reporting. */
-export async function kvHolder(name: string): Promise<string | null> {
+/**
+ * Who holds a lease right now, and for how much longer.
+ *
+ * The remaining time is read rather than assumed: a standby instance reports
+ * when it expects to be able to take over, and inventing that number would make
+ * the log line say something nobody checked.
+ */
+export async function kvHolder(name: string): Promise<{ holder: string; ttlMs: number | null } | null> {
   if (!kvAvailable()) return null;
-  return send<string>(["GET", key(name)]);
+  const holder = await send<string>(["GET", key(name)]);
+  if (!holder) return null;
+
+  // Negative replies mean no key (-2) or no expiry (-1); neither is a duration.
+  const pttl = await send<number>(["PTTL", key(name)]);
+  return { holder, ttlMs: typeof pttl === "number" && pttl >= 0 ? pttl : null };
 }
 
 /** Round-trip check used by the health endpoint. */

@@ -156,9 +156,19 @@ export async function releaseLease(name: string, holder = INSTANCE_ID): Promise<
 
 export async function leaseHolder(name: string): Promise<Lease | null> {
   if (kvAvailable()) {
-    const holder = await kvHolder(name);
-    // Redis stores only the holder; the expiry lives in its own TTL.
-    if (holder) return { holder, expiresAt: "(redis ttl)", renewedAt: "(redis)" };
+    const current = await kvHolder(name);
+    if (current) {
+      // Redis keeps the expiry as a TTL rather than a timestamp, so it is read
+      // back and turned into one. Without a TTL — which should not happen, but
+      // would mean a lease nobody can time out — say so rather than print a
+      // date that was never checked.
+      return {
+        holder: current.holder,
+        expiresAt:
+          current.ttlMs === null ? "unknown" : new Date(Date.now() + current.ttlMs).toISOString(),
+        renewedAt: "(redis)",
+      };
+    }
   }
   return (await readState()).leases?.[name] ?? null;
 }

@@ -201,12 +201,18 @@ export async function startScheduler(): Promise<void> {
     return;
   }
 
+  /** Renders a lease expiry, or nothing at all when there is no usable one. */
+  const expiryLabel = (expiresAt: string): string => {
+    const at = new Date(expiresAt);
+    return Number.isNaN(at.getTime()) ? "" : ` until ${at.toISOString().slice(11, 19)}Z`;
+  };
+
   let acquired = await acquireLease(SCHEDULER_LEASE).catch(() => false);
 
   if (!acquired) {
     const holder = await leaseHolder(SCHEDULER_LEASE).catch(() => null);
     log(
-      `standing by — the scheduler lease is held${holder ? ` by ${holder.holder} until ${holder.expiresAt.slice(11, 19)}Z` : ""}. Serving HTTP; will take over if it is released or expires.`
+      `standing by — the scheduler lease is held${holder ? ` by ${holder.holder}${expiryLabel(holder.expiresAt)}` : ""}. Serving HTTP; will take over if it is released or expires.`
     );
 
     /**

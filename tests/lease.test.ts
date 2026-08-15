@@ -105,3 +105,13 @@ test("the rest of the document survives lease writes", async () => {
   assert.equal(state.lastTelegramUpdateId, 42);
   assert.equal(state.subscriptions.length, 1);
 });
+
+test("a reported expiry is a real timestamp", async () => {
+  // It is rendered into the standby log line, and a placeholder there once made
+  // the process announce it was standing by "until Z".
+  await acquireLease("scheduler", { holder: "A" });
+  const held = await leaseHolder("scheduler");
+  assert.ok(held);
+  assert.ok(!Number.isNaN(new Date(held.expiresAt).getTime()), held.expiresAt);
+  assert.ok(new Date(held.expiresAt).getTime() > Date.now() - 1000);
+});
