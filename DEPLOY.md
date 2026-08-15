@@ -189,6 +189,59 @@ set `VELTR_SCHEDULER=off` on every replica but one.
 
 ---
 
+## Deploying a change
+
+Push to `main`. Vercel builds the website from the connected repository, and
+Railway is redeployed with `railway up --service veltr-agent`.
+
+### Three traps this deployment actually hit
+
+**A Dockerfile `VOLUME` instruction.** Railway rejects it outright — it manages
+volumes itself. Removed; plain Docker users mount `-v veltr-data:/data`.
+
+**Volume ownership.** A platform volume is mounted over `/data` *after* the image
+is built, arriving owned by root, while the image runs as `node`. The symptom is
+not a crash: `/api/health` reports `storage: unwritable`, and the scheduler never
+starts, because taking its lease is itself a write. `docker-entrypoint.sh` holds
+root for exactly one `chown` and then execs as `node`.
+
+**`export const revalidate` on a route handler.** It prerenders the route as a
+static file, and the Vercel build then fails assembling its output with
+`Unable to find lambda for route: /api/history`. All three affected routes
+already set `Cache-Control` explicitly, so the export was redundant as well as
+harmful.
+
+### If a Vercel deployment sits at "Building…" forever
+
+It is probably not building. Check with:
+
+```bash
+vercel deploy --prod --yes --debug 2>&1 | grep readyStateReason
+```
+
+A deployment can come back `"readyState": "BLOCKED"` with
+`"alwaysRefuseToBuild": true` and a reason like *"Git author … must have access
+to the team"*. Vercel attributes a CLI deployment to the HEAD commit's author and
+refuses it when that address is not on the Vercel account. Neither the CLI
+spinner nor `vercel inspect` says so — both report `UNKNOWN` indefinitely.
+
+The repository commits under a GitHub `noreply` address, deliberately, so the
+operator's personal email never enters the history. That address therefore has to
+be added to the Vercel account, or deployments have to come through the connected
+repository rather than the CLI. Both are one-time.
+
+As a last resort, deploy a copy that carries no git metadata:
+
+```bash
+git archive HEAD | tar -x -C /tmp/stage
+cp .vercel/project.json /tmp/stage/.vercel/
+cd /tmp/stage && vercel deploy --prod --yes
+```
+
+`git archive` guarantees only committed files are sent — no `.env`, no `data/`.
+
+---
+
 ## Known limitations
 
 - **Single machine.** Caches, provider rate-limit budgets and the per-chat request
