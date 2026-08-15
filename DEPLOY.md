@@ -191,8 +191,22 @@ set `VELTR_SCHEDULER=off` on every replica but one.
 
 ## Deploying a change
 
-Push to `main`. Vercel builds the website from the connected repository, and
-Railway is redeployed with `railway up --service veltr-agent`.
+Push to `main`. Both hosts build from the connected repository — Vercel the
+website, Railway the agent.
+
+`railway up --service veltr-agent` still works and is the way to deploy a
+working tree that has not been pushed, but it is no longer required.
+
+Connecting the Railway side is two separate grants, which is easy to miss:
+linking a GitHub account to Railway does not bind a repo to a service. The
+service-level binding is
+
+```
+railway service source connect --repo <owner>/<repo> --branch main --service veltr-agent
+```
+
+and until it exists `railway status --json` reports `source.repo: null` however
+thoroughly the account is connected.
 
 ### Three traps this deployment actually hit
 
