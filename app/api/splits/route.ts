@@ -2,7 +2,16 @@ import { NextResponse } from "next/server";
 import { buildRadarSnapshot } from "@/lib/tokens";
 import { fetchAnnouncedSplits, matchSplitsToTokens } from "@/lib/splits-calendar";
 
-export const revalidate = 1800;
+/**
+ * Served through a function, cached at the edge for the same window.
+ *
+ * `export const revalidate` prerendered this route as a static file, and the
+ * Vercel build then failed assembling the output with "Unable to find lambda for
+ * route: /api/splits". The Cache-Control header this route already sets gives the same caching
+ * behaviour — one origin hit per window — without the
+ * route needing to be a static asset.
+ */
+export const dynamic = "force-dynamic";
 
 /**
  * Announced splits, and which of them land on a token that exists on this chain.
