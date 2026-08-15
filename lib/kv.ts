@@ -155,6 +155,34 @@ export async function kvIncr(name: string, windowMs: number): Promise<number | n
   return send<number>(["EVAL", script, 1, key(name), windowMs]);
 }
 
+/**
+ * Adds to a counter that expires as a whole.
+ *
+ * The same window rule as `kvIncr` — the expiry is set only on creation, so the
+ * period runs from its first hit rather than sliding forward on every write and
+ * never resetting. Separate from `kvIncr` because a token count moves by
+ * thousands at a time and calling INCR in a loop would be absurd.
+ */
+export async function kvIncrBy(name: string, amount: number, windowMs: number): Promise<number | null> {
+  if (!kvAvailable()) {
+    const k = key(name);
+    const current = Number(localGet(k) ?? 0) + amount;
+    const existing = local.get(k);
+    local.set(k, {
+      value: String(current),
+      expiresAt: existing && existing.expiresAt > Date.now() ? existing.expiresAt : Date.now() + windowMs,
+    });
+    return current;
+  }
+
+  const script = `
+    local n = redis.call('INCRBY', KEYS[1], ARGV[1])
+    if n == tonumber(ARGV[1]) then redis.call('PEXPIRE', KEYS[1], ARGV[2]) end
+    return n
+  `;
+  return send<number>(["EVAL", script, 1, key(name), amount, windowMs]);
+}
+
 /* --------------------------------------------------------------- Lease */
 
 /**

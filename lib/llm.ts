@@ -16,6 +16,8 @@
  * shared account would quietly consume the credit the daily brief depends on.
  * Separate accounts mean one workload cannot starve the other.
  */
+import { announceOnce, recordSpend, spendAllows, usageFrom } from "./spend";
+
 export type Tier = "fast" | "deep" | "code";
 
 type Gateway = {
@@ -150,6 +152,12 @@ async function callGateway(
   const json = await res.json();
   const choice = json.choices?.[0];
   const text: string = choice?.message?.content ?? "";
+
+  // Metered before the empty-content check: a call that returned nothing usable
+  // was still paid for, and a meter that only counts successes is a meter that
+  // undercounts exactly when something is going wrong.
+  void recordSpend(usageFrom(json, system.length + user.length, text.length)).catch(() => {});
+
   if (!text.trim()) throw new Error(`${gateway.name} returned empty content`);
 
   const reason = choice?.finish_reason ?? choice?.native_finish_reason;
@@ -160,6 +168,31 @@ async function callGateway(
   };
 }
 
+/**
+ * The daily ceiling, checked at the one door every model call goes through.
+ *
+ * Returning null rather than throwing: every caller already handles a null as
+ * "no gateway answered", so a ceiling degrades the product the same way an
+ * outage does instead of surfacing as a crash.
+ */
+async function overCeiling(): Promise<boolean> {
+  const verdict = await spendAllows("interactive");
+  if (verdict.allowed) return false;
+
+  console.warn(`[veltr][SPEND] refusing — ${verdict.tokens} tokens today, ceiling ${verdict.ceiling}`);
+  void announceOnce(
+    "hard",
+    [
+      "🛑 Veltr has stopped calling the model.",
+      "",
+      `The daily ceiling is spent: ${verdict.tokens.toLocaleString()} tokens against a limit of ${verdict.ceiling.toLocaleString()}.`,
+      "",
+      "Everything else still works — prices, watches and alerts do not use the model. Answers and missions resume at midnight UTC, or raise VELTR_DAILY_TOKEN_HARD.",
+    ].join("\n")
+  ).catch(() => {});
+  return true;
+}
+
 /** Tries each configured gateway in order; returns null if all fail or none exist. */
 export async function complete(
   tier: Tier,
@@ -167,6 +200,8 @@ export async function complete(
   user: string,
   maxTokens = 700
 ): Promise<LlmResult> {
+  if (await overCeiling()) return null;
+
   for (const gateway of gateways(tier)) {
     try {
       return await callGateway(gateway, system, user, maxTokens);
@@ -233,6 +268,11 @@ export async function chatWithTools(
 
       const json = await res.json();
       const message = json.choices?.[0]?.message;
+
+      void recordSpend(
+        usageFrom(json, JSON.stringify(messages).length, JSON.stringify(message ?? "").length)
+      ).catch(() => {});
+
       if (!message) throw new Error(`${gateway.name} returned no message`);
 
       return { message, model: gateway.name };

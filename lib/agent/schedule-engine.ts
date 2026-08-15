@@ -12,6 +12,7 @@ import {
   type Schedule,
 } from "./schedule";
 import type { Mission } from "./types";
+import { announceOnce, spendAllows } from "../spend";
 
 /**
  * The recurring-mission runner.
@@ -134,6 +135,8 @@ export type ScheduleReport = {
   sent: number;
   failed: number;
   paused: number;
+  /** Due runs held back because the daily model ceiling was reached. */
+  skippedForSpend: number;
 };
 
 async function defaultDeps(): Promise<ScheduleDeps> {
@@ -184,12 +187,33 @@ function renderChange(schedule: Schedule, mission: Mission): string {
 export async function runScheduleCycle(overrides: Partial<ScheduleDeps> = {}): Promise<ScheduleReport> {
   const deps: ScheduleDeps = { ...(await defaultDeps()), ...overrides };
   const now = deps.now();
-  const report: ScheduleReport = { ranAt: now.toISOString(), due: 0, ran: 0, changed: 0, sent: 0, failed: 0, paused: 0 };
+  const report: ScheduleReport = { ranAt: now.toISOString(), due: 0, ran: 0, changed: 0, sent: 0, failed: 0, paused: 0, skippedForSpend: 0 };
 
   const schedules = await deps.loadSchedules();
   const due = schedules.filter((s) => isDue(s, now));
   report.due = due.length;
   if (due.length === 0) return report;
+
+  // Work nobody is waiting for yields first. Checked before the run rather than
+  // inside it, so a mission is never abandoned half-finished — the schedule
+  // simply does not come due again until the day rolls over.
+  const verdict = await spendAllows("autonomous", now);
+  if (!verdict.allowed) {
+    report.skippedForSpend = report.due;
+    console.log(`[veltr][SCHEDULE] ${report.due} due but held — ${verdict.tokens} tokens spent today`);
+    void announceOnce(
+      "soft",
+      [
+        "⏸ Scheduled missions are paused for today.",
+        "",
+        `Model usage has reached ${verdict.tokens.toLocaleString()} tokens, the point where work that runs on a timer stops so that answers you ask for keep working.`,
+        "",
+        "They resume at midnight UTC. /spend for the detail.",
+      ].join("\n"),
+      now
+    ).catch(() => {});
+    return report;
+  }
 
   // Oldest check first, so a busy account cycles fairly rather than starving one.
   const schedule = [...due].sort((a, b) => (a.lastRunAt ?? "").localeCompare(b.lastRunAt ?? ""))[0];

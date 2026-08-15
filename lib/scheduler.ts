@@ -7,6 +7,9 @@ import { runTrackCycleSafely } from "./track/engine";
 import { runScheduleCycleSafely } from "./agent/schedule-engine";
 import { MIN_INTERVAL_SEC } from "./watch/settings";
 import { acquireLease, keepLease, leaseHolder, INSTANCE_ID } from "./lease";
+import { kvAvailable } from "./kv";
+import { backupNow, describeCensus, restoreIfEmpty } from "./backup";
+import { notifyOwner } from "./owner";
 
 /**
  * In-process background scheduler.
@@ -27,6 +30,13 @@ let started = false;
 
 const WATCH_INTERVAL_MS = 60_000;
 const BRIEF_CHECK_MS = 10 * 60_000;
+/**
+ * How often a copy is taken.
+ *
+ * Half-hourly is the most that can be lost, and it costs two shared-store
+ * commands to buy that — roughly 3,000 a month against a budget of 500,000.
+ */
+const BACKUP_TICK_MS = 30 * 60_000;
 const BRIEF_HOUR_UTC = Number(process.env.VELTR_BRIEF_HOUR_UTC ?? 13);
 
 /**
@@ -151,6 +161,31 @@ async function scheduleLoop() {
   }
 }
 
+/**
+ * Off-host copies of the state document.
+ *
+ * Runs on the lease holder only, like every other loop here — several instances
+ * racing to overwrite the same backup would be a way to lose one, not to keep
+ * more of them.
+ */
+async function backupLoop() {
+  if (!kvAvailable()) {
+    log("backups off — no shared store configured, so the only copy is the volume");
+    return;
+  }
+  log(`state backups started — every ${BACKUP_TICK_MS / 60_000}m`);
+
+  for (;;) {
+    const outcome = await backupNow();
+    if (outcome.ok) {
+      log(`[BACKUP] ${describeCensus(outcome.counts)} — ${Math.round(outcome.bytes / 1024)}KB`);
+    } else if (outcome.reason !== "unavailable") {
+      log(`[BACKUP] not taken: ${outcome.reason}${outcome.detail ? ` (${outcome.detail})` : ""}`);
+    }
+    await new Promise((r) => setTimeout(r, BACKUP_TICK_MS));
+  }
+}
+
 async function briefLoop() {
   for (;;) {
     await new Promise((r) => setTimeout(r, BRIEF_CHECK_MS));
@@ -237,6 +272,24 @@ export async function startScheduler(): Promise<void> {
   started = true;
   log(`scheduler lease acquired by ${INSTANCE_ID}`);
 
+  // Before anything reads or writes state: if the volume came back empty, put
+  // the copy back. Only ever into a hole — a restore over live data would be a
+  // second incident, so this returns "not-needed" for every ordinary boot.
+  const restored = await restoreIfEmpty();
+  if (restored.ok) {
+    log(`RESTORED from the copy taken at ${restored.from} — ${describeCensus(restored.counts)}`);
+    void notifyOwner(
+      [
+        "⚠️ Veltr restored itself from backup.",
+        "",
+        `Local state was empty on boot — the volume was lost or replaced. Put back the copy taken at ${restored.from}:`,
+        describeCensus(restored.counts),
+        "",
+        "Anything that happened between that time and now is gone. Worth checking nothing looks wrong.",
+      ].join("\n")
+    ).catch(() => {});
+  }
+
   // Losing the lease means another instance took over. Nothing here can be
   // safely stopped mid-flight, so it is reported loudly rather than pretended
   // away — the loops are idempotent enough to overlap briefly, and a operator
@@ -251,4 +304,5 @@ export async function startScheduler(): Promise<void> {
   void trackLoop();
   void scheduleLoop();
   void briefLoop();
+  void backupLoop();
 }

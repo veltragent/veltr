@@ -41,6 +41,36 @@ export async function ownerChatId(): Promise<string | null> {
   return state.ownerChatId ?? null;
 }
 
+/**
+ * Tells the operator something about the system itself.
+ *
+ * For conditions nobody asked to hear about — a restore, a spending ceiling, a
+ * loop that died. Silent when the owner is not known yet rather than falling
+ * back to whoever is around: an operational warning sent to a user is both
+ * meaningless to them and a leak of how the system is doing.
+ */
+export async function notifyOwner(text: string): Promise<boolean> {
+  const id = await ownerChatId();
+  if (!id) {
+    console.warn("[veltr][OWNER] no owner known yet; not sent:", text.split("\n")[0]);
+    return false;
+  }
+  const { sendTelegram } = await import("./notify");
+  return sendTelegram(id, text);
+}
+
+/**
+ * Is this chat the operator?
+ *
+ * For commands that report on the system rather than the market. Answers false
+ * when no owner is known, so an unconfigured deployment exposes nothing rather
+ * than exposing it to everybody.
+ */
+export async function isOwner(chatId: string): Promise<boolean> {
+  const id = await ownerChatId();
+  return Boolean(id) && id === chatId;
+}
+
 /** Is the restriction switched on at all? */
 export function ownerRestrictionEnabled(): boolean {
   return Boolean(ownerUsername() || (process.env.VELTR_OWNER_CHAT_ID ?? "").trim());

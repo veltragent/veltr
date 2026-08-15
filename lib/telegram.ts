@@ -32,7 +32,9 @@ import {
   missionSummary,
 } from "./agent/commands";
 import { removeAllMissions } from "./agent/store";
-import { learnOwner } from "./owner";
+import { learnOwner, isOwner } from "./owner";
+import { describeSpend, spendToday } from "./spend";
+import { describeCensus, readLatest } from "./backup";
 import { handleTrack, handleTracks, handleUntrack } from "./track/commands";
 import { removeAllTracks } from "./track/store";
 import { handleEvery, handleSchedules, handleUnschedule } from "./agent/schedule-commands";
@@ -457,6 +459,28 @@ A step already in flight will finish — an HTTP call cannot be recalled — but
             ? await handleUntrack(chatId, verbArg)
             : await withActivity(chatId, "typing", () => handleTrack(chatId, verbArg));
       await sendTelegram(chatId, clamp(reply.text));
+      continue;
+    }
+
+    // Operational, not market: what the system is costing, and whether its own
+    // backups are running. Answered only for the operator — to anyone else it
+    // does not exist, which is why it is not in the command menu either.
+    if (verb === "/spend") {
+      if (!(await isOwner(chatId))) {
+        await sendTelegram(chatId, "Unknown command. /help for what I can do.");
+        continue;
+      }
+      const [spend, snapshot] = await Promise.all([spendToday(), readLatest()]);
+      await sendTelegram(
+        chatId,
+        [
+          describeSpend(spend),
+          "",
+          snapshot
+            ? `Last backup ${snapshot.at.slice(0, 16).replace("T", " ")}Z — ${describeCensus(snapshot.counts)}`
+            : "No backup has been taken yet.",
+        ].join("\n")
+      );
       continue;
     }
 
