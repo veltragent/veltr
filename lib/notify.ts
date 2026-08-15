@@ -211,6 +211,8 @@ export async function registerBotCommands(): Promise<boolean> {
     { command: "track", description: "Watch a repo or page and tell me only when it changes" },
     { command: "tracks", description: "What you are tracking for changes" },
     { command: "mission", description: "Give me an objective and I work out the steps" },
+    { command: "every", description: "Run a mission on a schedule — /every 1h <objective>" },
+    { command: "schedules", description: "Your recurring missions" },
     { command: "missions", description: "Your missions and anything awaiting approval" },
     { command: "status", description: "What Veltr is currently seeing" },
     { command: "cancel", description: "Abandon the request currently running" },

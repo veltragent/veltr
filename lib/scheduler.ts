@@ -4,6 +4,7 @@ import { dispatchPending, registerBotCommands } from "./notify";
 import { readState } from "./store";
 import { runWatchCycleSafely } from "./watch/engine";
 import { runTrackCycleSafely } from "./track/engine";
+import { runScheduleCycleSafely } from "./agent/schedule-engine";
 import { MIN_INTERVAL_SEC } from "./watch/settings";
 import { acquireLease, keepLease, leaseHolder, INSTANCE_ID } from "./lease";
 
@@ -40,6 +41,14 @@ const TOKEN_WATCH_TICK_MS = MIN_INTERVAL_SEC * 1000;
 
 /** The change monitor decides per target when it is due; this is only the wake-up. */
 const TRACK_TICK_MS = 5 * 60_000;
+
+/**
+ * How often a due recurring mission is picked up.
+ *
+ * The cycle runs at most one mission per tick — they take a minute or two and
+ * cost several model calls — so this is a wake-up, not a rate.
+ */
+const SCHEDULE_TICK_MS = 5 * 60_000;
 
 function log(...args: unknown[]) {
   console.log("[veltr:scheduler]", ...args);
@@ -125,6 +134,19 @@ async function trackLoop() {
     const report = await runTrackCycleSafely();
     if (report && (report.changed > 0 || report.failed > 0)) {
       log(`[TRACK] due=${report.due} fetched=${report.fetched} changed=${report.changed} sent=${report.sent} failed=${report.failed}${report.paused ? ` paused=${report.paused}` : ""}`);
+    }
+  }
+}
+
+/** Recurring missions. Silent unless the figures a run observes actually move. */
+async function scheduleLoop() {
+  log("mission scheduler started — tick every 5m");
+
+  for (;;) {
+    await new Promise((r) => setTimeout(r, SCHEDULE_TICK_MS));
+    const report = await runScheduleCycleSafely();
+    if (report && report.ran > 0) {
+      log(`[SCHEDULE] due=${report.due} ran=${report.ran} changed=${report.changed} sent=${report.sent} failed=${report.failed}`);
     }
   }
 }
@@ -221,5 +243,6 @@ export async function startScheduler(): Promise<void> {
   void watchLoop();
   void tokenWatchLoop();
   void trackLoop();
+  void scheduleLoop();
   void briefLoop();
 }

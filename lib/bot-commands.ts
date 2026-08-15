@@ -526,6 +526,9 @@ MISSIONS
                 to observe, act only with your approval, and
                 verify before reporting
 /missions       your missions and anything awaiting approval
+/every 1h …     run one on a schedule; silent unless figures move
+/schedules      your recurring missions
+/unschedule 1   stop one
 
 CHANGE TRACKING
 /track vercel/next.js   a repository — tells you when a commit lands

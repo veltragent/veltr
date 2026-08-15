@@ -45,6 +45,38 @@ function budgetAllows(budget: Budget, now: number): boolean {
   return budget.hits.length < budget.limit;
 }
 
+/**
+ * The same budget, counted across every instance.
+ *
+ * These limits are enforced by the provider per IP, not per process. Two
+ * replicas each politely staying under twenty GeckoTerminal calls a minute make
+ * forty against a published limit of thirty — and every process involved
+ * believes it behaved. Only a shared counter can see that.
+ *
+ * The window is the wall clock rounded down, so every instance agrees which
+ * minute it is without needing to agree on anything else.
+ *
+ * Returns true when the store is unreachable: a key-value outage must not stop
+ * the product from reading a price. The process-local budget still applies, so
+ * the fallback is exactly the old behaviour.
+ */
+async function sharedBudgetAllows(provider: ProviderTag, budget: Budget, now: number): Promise<boolean> {
+  const { kvAvailable, kvIncr } = await import("../kv");
+  if (!kvAvailable()) return true;
+
+  const window = Math.floor(now / budget.windowMs);
+  const used = await kvIncr(`budget:${provider}:${window}`, budget.windowMs * 2);
+  if (used === null) return true;
+
+  if (used > budget.limit) {
+    console.warn(
+      `[veltr][${provider}] shared budget exhausted: ${used}/${budget.limit} across all instances this window`
+    );
+    return false;
+  }
+  return true;
+}
+
 /** Test seam: clears the process-wide budget between cases. */
 export function resetBudgets(): void {
   for (const budget of Object.values(BUDGETS)) {
@@ -99,6 +131,15 @@ export async function getJson<T>(
         `[veltr][${provider}] request skipped${subject ? ` token=${subject}` : ""} reason=${
           waiting > 0 ? `cooling_off_${Math.ceil(waiting / 1000)}s` : "local_budget_exhausted"
         }`
+      );
+      return null;
+    }
+
+    // Checked after the local budget, so an instance that is already over its own
+    // share never spends a shared counter increment to find that out.
+    if (!(await sharedBudgetAllows(provider, budget, now))) {
+      console.warn(
+        `[veltr][${provider}] request skipped${subject ? ` token=${subject}` : ""} reason=shared_budget_exhausted`
       );
       return null;
     }

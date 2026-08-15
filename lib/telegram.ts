@@ -35,6 +35,8 @@ import { removeAllMissions } from "./agent/store";
 import { learnOwner } from "./owner";
 import { handleTrack, handleTracks, handleUntrack } from "./track/commands";
 import { removeAllTracks } from "./track/store";
+import { handleEvery, handleSchedules, handleUnschedule } from "./agent/schedule-commands";
+import { removeAllSchedules } from "./agent/schedule-engine";
 import { runCommand, clamp, BOT_HELP, INTRODUCTION } from "./bot-commands";
 import { runAgentLoop } from "./agent-loop";
 import { startProgress } from "./progress";
@@ -329,10 +331,12 @@ A step already in flight will finish — an HTTP call cannot be recalled — but
         const dropped = await removeAllWatches(chatId).catch(() => 0);
         const missions = await removeAllMissions(chatId).catch(() => 0);
         const tracks = await removeAllTracks(chatId).catch(() => 0);
+        const schedules = await removeAllSchedules(chatId).catch(() => 0);
         const extra = [
           dropped > 0 ? `stopped watching ${dropped} token${dropped === 1 ? "" : "s"}` : "",
           missions > 0 ? `discarded ${missions} mission${missions === 1 ? "" : "s"}` : "",
           tracks > 0 ? `stopped tracking ${tracks} target${tracks === 1 ? "" : "s"}` : "",
+          schedules > 0 ? `cancelled ${schedules} schedule${schedules === 1 ? "" : "s"}` : "",
         ].filter(Boolean);
         await sendTelegram(
           chatId,
@@ -441,6 +445,17 @@ A step already in flight will finish — an HTTP call cannot be recalled — but
           : verb === "/untrack"
             ? await handleUntrack(chatId, verbArg)
             : await withActivity(chatId, "typing", () => handleTrack(chatId, verbArg));
+      await sendTelegram(chatId, clamp(reply.text));
+      continue;
+    }
+
+    if (verb === "/every" || verb === "/schedules" || verb === "/unschedule") {
+      const reply =
+        verb === "/schedules"
+          ? await handleSchedules(chatId)
+          : verb === "/unschedule"
+            ? await handleUnschedule(chatId, verbArg)
+            : await handleEvery(chatId, verbArg);
       await sendTelegram(chatId, clamp(reply.text));
       continue;
     }

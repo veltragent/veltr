@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mutateState, readState } from "./store";
+import { kvAcquire, kvAvailable, kvHolder, kvRelease } from "./kv";
 
 /**
  * Single-writer lease for the background scheduler.
@@ -19,10 +20,14 @@ import { mutateState, readState } from "./store";
  * crashed holder is replaced automatically rather than blocking the product
  * until someone notices.
  *
- * Scope, stated plainly: this is backed by the shared state file, so it is
- * correct for several processes on one machine — which is the case that broke.
- * Across machines it needs shared storage; the same interface then sits over
- * Redis without the scheduler changing.
+ * Two backings, chosen at call time. With Redis configured the lease lives there
+ * and is correct across machines; without it the lease lives in the shared state
+ * file and is correct for several processes on one machine — which is the case
+ * that actually broke here.
+ *
+ * The fallback is not a lesser mode to be embarrassed about: a single instance
+ * with a volume needs nothing more, and a Redis outage should cost you
+ * cross-machine coordination rather than the scheduler itself.
  */
 
 export type Lease = {
@@ -44,8 +49,14 @@ export const INSTANCE_ID = `${process.pid}-${randomUUID().slice(0, 8)}`;
  */
 export const LEASE_TTL_MS = 45_000;
 
-/** Renewed at a third of the TTL, so two heartbeats can be missed before expiry. */
-export const HEARTBEAT_MS = 15_000;
+/**
+ * Renewed at two thirds of the TTL, so one heartbeat may be missed before expiry.
+ *
+ * Chosen against the Upstash command budget rather than arbitrarily: at 15s this
+ * one timer alone would spend roughly 175,000 commands a month, a third of the
+ * free tier, to do nothing but say "still here".
+ */
+export const HEARTBEAT_MS = 30_000;
 
 function expired(lease: Lease | null | undefined, now: Date): boolean {
   if (!lease) return true;
@@ -65,6 +76,13 @@ export async function acquireLease(
   const holder = options.holder ?? INSTANCE_ID;
   const now = options.now ?? new Date();
   const ttl = options.ttlMs ?? LEASE_TTL_MS;
+
+  // One atomic round trip when Redis is configured; the file is the fallback.
+  if (kvAvailable()) {
+    const taken = await kvAcquire(name, holder, ttl);
+    if (taken !== null) return taken;
+    console.warn("[veltr][LEASE] Redis unreachable; falling back to the state file");
+  }
 
   return mutateState<boolean>((state) => {
     const leases = state.leases ?? {};
@@ -98,6 +116,13 @@ export async function renewLease(
   const now = options.now ?? new Date();
   const ttl = options.ttlMs ?? LEASE_TTL_MS;
 
+  // kvAcquire renews for the same holder, so acquire and renew are one call.
+  if (kvAvailable()) {
+    const held = await kvAcquire(name, holder, ttl);
+    if (held !== null) return held;
+    console.warn("[veltr][LEASE] Redis unreachable during renew; falling back");
+  }
+
   return mutateState<boolean>((state) => {
     const leases = state.leases ?? {};
     const current = leases[name];
@@ -120,6 +145,8 @@ export async function renewLease(
 
 /** Gives up a lease so a restart does not have to wait out the TTL. */
 export async function releaseLease(name: string, holder = INSTANCE_ID): Promise<void> {
+  if (kvAvailable()) await kvRelease(name, holder);
+
   await mutateState((state) => {
     const leases = { ...(state.leases ?? {}) };
     if (leases[name]?.holder === holder) delete leases[name];
@@ -128,6 +155,11 @@ export async function releaseLease(name: string, holder = INSTANCE_ID): Promise<
 }
 
 export async function leaseHolder(name: string): Promise<Lease | null> {
+  if (kvAvailable()) {
+    const holder = await kvHolder(name);
+    // Redis stores only the holder; the expiry lives in its own TTL.
+    if (holder) return { holder, expiresAt: "(redis ttl)", renewedAt: "(redis)" };
+  }
   return (await readState()).leases?.[name] ?? null;
 }
 

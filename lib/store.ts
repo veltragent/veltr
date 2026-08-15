@@ -5,6 +5,7 @@ import type { TokenWatch, WatchSettings } from "./watch/types";
 import type { Mission } from "./agent/types";
 import type { Track } from "./track/store";
 import type { Lease } from "./lease";
+import type { Schedule } from "./agent/schedule";
 
 /**
  * File-backed state for the watcher.
@@ -102,6 +103,11 @@ export type WatcherState = {
    * other's updates and send every alert twice.
    */
   leases: Record<string, Lease>;
+  /**
+   * Recurring missions. Each run is a full mission, so these are few, slow and
+   * silent unless the figures they observe actually move.
+   */
+  schedules: Schedule[];
 };
 
 const EMPTY: WatcherState = {
@@ -120,6 +126,7 @@ const EMPTY: WatcherState = {
   ownerChatId: null,
   tracks: [],
   leases: {},
+  schedules: [],
 };
 
 let memo: WatcherState | null = null;
