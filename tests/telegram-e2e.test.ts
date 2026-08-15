@@ -292,3 +292,30 @@ test("the long-poll cursor advances so a message is never handled twice", async 
     net.restore();
   }
 });
+
+/* --------------------------------------------- Acknowledging a batch */
+
+test("every message in a batch is acknowledged before any of them is answered", async () => {
+  // Replies are produced one at a time, so without a dedicated pass the second
+  // message would not be reacted to until the first reply had been sent — and
+  // that first reply may be a mission lasting tens of seconds.
+  const net = intercept({ updates: [message(108, "/help"), message(109, "/help")] });
+
+  try {
+    await syncTelegram(0);
+
+    const order = net.calls.map((c) => c.method);
+    const reactions = order.filter((m) => m === "setMessageReaction").length;
+    const lastReaction = order.lastIndexOf("setMessageReaction");
+    const firstReply = order.indexOf("sendMessage");
+
+    assert.equal(reactions, 2, "both messages were acknowledged");
+    assert.ok(firstReply > -1, "and both were answered");
+    assert.ok(
+      lastReaction < firstReply,
+      `an acknowledgement queued behind a reply: ${order.join(" ")}`
+    );
+  } finally {
+    net.restore();
+  }
+});

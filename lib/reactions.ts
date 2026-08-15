@@ -61,18 +61,20 @@ export const FILE_RECEIVED_EMOJI = "👀";
 /* ---------------------------------------------------------------- Timing */
 
 /**
- * How long to wait before reacting.
+ * How long to wait before reacting. Zero: the reaction goes out the moment the
+ * message is read, before any work on the reply begins.
  *
- * A reaction that lands in the same instant as the message reads as a webhook
- * firing, not as something having been read — it is the tell that gives away an
- * unattended bot. A short pause reads as attention.
+ * This was once half a second, on the theory that a reaction landing in the same
+ * instant reads as a webhook firing rather than as attention. In use the trade
+ * went the other way: what the pause actually buys is a second of silence right
+ * where the user is looking for a sign the thing is alive, and the emoji already
+ * carries the signal of having been read, since it reflects what was understood
+ * rather than merely that something arrived.
  *
- * Kept short on purpose. The reaction's job is to arrive *before* the answer,
- * so it must stay well inside the time even a trivial reply takes: past a second
- * or so it starts landing after the thing it was meant to precede, which is
- * worse than being instant.
+ * The pause is still available — set VELTR_REACT_DELAY_MS — for anyone who wants
+ * it back.
  */
-const DEFAULT_DELAY_MS = 500;
+const DEFAULT_DELAY_MS = 0;
 
 /** Spread added on top of the base, so the pause is not a metronome. */
 const DEFAULT_JITTER_MS = 700;

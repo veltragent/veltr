@@ -246,6 +246,34 @@ export async function syncTelegram(longPollSeconds = 0): Promise<SyncResult> {
 
   const updates: TelegramUpdate[] = json.result ?? [];
 
+  /**
+   * Acknowledge everything in the batch before working on any of it.
+   *
+   * Replies are produced one at a time — an agent answer is awaited inside the
+   * loop below — so a second message would otherwise wait out the first one's
+   * whole run before so much as being reacted to. The emoji costs nothing and
+   * depends only on the text, so there is no reason for it to queue behind
+   * somebody else's mission.
+   *
+   * Dispatched, never awaited: a cosmetic acknowledgement must not hold up the
+   * answer it is meant to precede.
+   */
+  for (const update of updates) {
+    const message = update.message;
+    if (!message?.message_id) continue;
+
+    const chat = String(message.chat.id);
+    const messageId = message.message_id;
+    const intent = message.document
+      ? FILE_RECEIVED_EMOJI
+      : reactionFor(message.text ?? message.caption ?? "");
+    const delay = reactionDelayMs();
+
+    void (delay > 0
+      ? new Promise((r) => setTimeout(r, delay)).then(() => reactTo(chat, messageId, intent))
+      : reactTo(chat, messageId, intent));
+  }
+
   let subscriptions = [...state.subscriptions];
   let added = 0;
   let removed = 0;
@@ -271,25 +299,8 @@ export async function syncTelegram(longPollSeconds = 0): Promise<SyncResult> {
     // then persisted, so the push restriction survives a restart.
     void learnOwner(chatId, message.from?.username).catch(() => {});
 
-    // Acknowledge before any work starts. The reply may be seconds away; this
-    // lands first, and its emoji reflects what was understood rather than merely
-    // received.
-    //
-    // After a short pause, not instantly: a reaction in the same instant as the
-    // message reads as a webhook firing rather than as having been read. The
-    // wait is deliberately not awaited — the answer must not be held up by a
-    // cosmetic acknowledgement.
-    if (message.message_id) {
-      const intent = message.document
-        ? FILE_RECEIVED_EMOJI
-        : reactionFor(message.text ?? message.caption ?? "");
-      const messageId = message.message_id;
-      const delay = reactionDelayMs();
-
-      void (delay > 0
-        ? new Promise((r) => setTimeout(r, delay)).then(() => reactTo(chatId, messageId, intent))
-        : reactTo(chatId, messageId, intent));
-    }
+    // The reaction for this message has already gone out, above, before any of
+    // the batch was worked on.
 
     // A document may arrive with a caption instead of text; the caption is the
     // instruction, so it is treated as the message.

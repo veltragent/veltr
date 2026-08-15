@@ -30,24 +30,23 @@ function withEnv<T>(vars: Record<string, string | undefined>, run: () => T): T {
 /** No env set: the delay must fall inside the documented default band. */
 const clean = { VELTR_REACT_DELAY_MS: undefined, VELTR_REACT_JITTER_MS: undefined };
 
-test("the default pause is short enough to precede any reply", () => {
+test("by default the reaction is instant", () => {
   withEnv(clean, () => {
+    // It goes out when the message is read, before any work on the reply — so
+    // no amount of jitter may reintroduce a pause.
+    assert.equal(reactionDelayMs(() => 0), 0);
+    assert.equal(reactionDelayMs(() => 0.5), 0);
+    assert.equal(reactionDelayMs(() => 1), 0, "jitter must not creep in on top of zero");
+  });
+});
+
+test("a pause can be asked for, and jitter spreads it", () => {
+  withEnv({ VELTR_REACT_DELAY_MS: "500" }, () => {
     assert.equal(reactionDelayMs(() => 0), 500, "the floor of the band");
     assert.equal(reactionDelayMs(() => 1), 1200, "the ceiling of the band");
-    assert.equal(reactionDelayMs(() => 0.5), 850);
-  });
-});
 
-test("jitter spreads the pause rather than fixing it", () => {
-  withEnv(clean, () => {
     const samples = new Set(Array.from({ length: 20 }, (_, i) => reactionDelayMs(() => i / 20)));
     assert.ok(samples.size > 1, "a fixed pause is a metronome, which is the tell being avoided");
-  });
-});
-
-test("zero restores the original instant behaviour", () => {
-  withEnv({ VELTR_REACT_DELAY_MS: "0" }, () => {
-    assert.equal(reactionDelayMs(() => 0.9), 0, "and jitter must not reintroduce a pause");
   });
 });
 
@@ -63,10 +62,10 @@ test("a delay outliving the reply is clamped", () => {
   });
 });
 
-test("a malformed setting falls back rather than disabling the pause", () => {
+test("a malformed setting falls back to the default rather than inventing a pause", () => {
   for (const bad of ["abc", "-100", "NaN", ""]) {
     withEnv({ VELTR_REACT_DELAY_MS: bad, VELTR_REACT_JITTER_MS: "0" }, () => {
-      assert.equal(reactionDelayMs(() => 0), 500, `"${bad}" must not silently change the behaviour`);
+      assert.equal(reactionDelayMs(() => 0), 0, `"${bad}" must not silently change the behaviour`);
     });
   }
 });
