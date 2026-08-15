@@ -1,7 +1,7 @@
 import { access, constants } from "node:fs/promises";
 import { dataDir } from "./paths";
 import { leaseHolder } from "./lease";
-import { loopAges, stalledLoops } from "./heartbeat";
+import { BEATS_STALE_MS, loopAges, readPublishedBeats, stalledLoops } from "./heartbeat";
 
 /**
  * What this process would say about itself.
@@ -19,6 +19,7 @@ export type HealthReport = {
     scheduler: "running" | "standby";
     loops: Record<string, number>;
     stalled?: string[];
+    watchdog?: "silent";
     uptimeSeconds: number;
     checkedInMs: number;
   };
@@ -46,11 +47,29 @@ export async function healthReport(): Promise<HealthReport> {
    * completely healthy from outside, while alerts silently stop forever — so
    * unless it is said here, no external monitor can ever see it.
    *
-   * Read from memory, costing nothing, and empty on the website, which deploys
-   * this same code and runs no loops.
+   * The loops almost never run in this process: request handlers are served
+   * from workers separate from the one that started the scheduler. So the
+   * in-memory view is used when there is one, and otherwise the file the
+   * watchdog publishes to the shared volume.
    */
-  const stalled = stalledLoops();
-  const healthy = storage === "writable" && stalled.length === 0;
+  const local = stalledLoops();
+  const inProcess = loopAges();
+  const published = Object.keys(inProcess).length > 0 ? null : await readPublishedBeats();
+
+  let loops = inProcess;
+  let stalled = local.map((s) => s.loop);
+  let writerSilent = false;
+
+  if (published?.known) {
+    loops = published.ages;
+    stalled = published.stalled.map((s) => s.loop);
+    // The watchdog writes this file; if it has stopped, every age in it is
+    // frozen and meaningless. That is a failure in its own right, not a reason
+    // to trust the numbers.
+    writerSilent = published.writerSilentMs > BEATS_STALE_MS;
+  }
+
+  const healthy = storage === "writable" && stalled.length === 0 && !writerSilent;
 
   return {
     httpStatus: healthy ? 200 : 503,
@@ -59,8 +78,9 @@ export async function healthReport(): Promise<HealthReport> {
       storage,
       // "standby" is a normal, correct state — not an error.
       scheduler: lease ? "running" : "standby",
-      loops: loopAges(),
-      ...(stalled.length ? { stalled: stalled.map((s) => s.loop) } : {}),
+      loops,
+      ...(stalled.length ? { stalled } : {}),
+      ...(writerSilent ? { watchdog: "silent" } : {}),
       uptimeSeconds: Math.round(process.uptime()),
       checkedInMs: Date.now() - startedAt,
     },

@@ -54,17 +54,96 @@ export function watchLoopHealth(loop: LoopName): void {
 export type Stall = { loop: LoopName; silentForMs: number; toleranceMs: number };
 
 /**
- * Age of every loop's last pass, for a health check.
+ * Age of every loop's last pass, as this process knows it.
  *
- * Read straight out of memory: a health endpoint runs often, and paying a
- * network round trip per loop to report on liveness would be its own small
- * runaway. Empty on a host that runs no loops — the website deploys the same
- * code and must not report the agent's loops as missing.
+ * Empty in a process that runs no loops, which is most of them — see
+ * `publishBeats`.
  */
 export function loopAges(now = Date.now()): Record<string, number> {
   const out: Record<string, number> = {};
   for (const [loop, last] of beats) out[loop] = Math.round((now - last) / 1000);
   return out;
+}
+
+/* ------------------------------------------------- Across processes */
+
+/**
+ * The loops run in one process; the health endpoint answers in another.
+ *
+ * Next.js serves request handlers from worker processes separate from the one
+ * that started the scheduler — the same split `store.ts` documents, and the
+ * reason a plain in-memory map is invisible to `/api/health`. Reported straight
+ * from memory, the stall check was dead code: production showed every loop
+ * running and `loops: {}` in the same breath.
+ *
+ * So the watchdog writes them where the other process can read them. On the
+ * volume rather than through the shared store, because both processes are on
+ * the same host and a file costs nothing — a health endpoint that spent a
+ * network round trip per call would be a new runaway in place of the old one.
+ */
+const HEARTBEAT_FILE = "heartbeat.json";
+
+/** Past this, the writer itself has stopped, which is its own failure. */
+export const BEATS_STALE_MS = 5 * 60_000;
+
+type BeatsFile = { instance: string; at: string; beats: Record<string, string> };
+
+export async function publishBeats(now = new Date()): Promise<void> {
+  const { writeFile, rename, mkdir } = await import("node:fs/promises");
+  const { dirname } = await import("node:path");
+  const { dataFile } = await import("./paths");
+
+  const path = dataFile(HEARTBEAT_FILE);
+  const payload: BeatsFile = {
+    instance: INSTANCE_ID,
+    at: now.toISOString(),
+    beats: Object.fromEntries([...beats].map(([loop, at]) => [loop, new Date(at).toISOString()])),
+  };
+
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    // Same atomic write the state document uses: a health check reading a
+    // half-written file would report a failure that is not happening.
+    const tmp = `${path}.${process.pid}.tmp`;
+    await writeFile(tmp, JSON.stringify(payload), "utf8");
+    await rename(tmp, path);
+  } catch {
+    // A volume that cannot be written is already reported by the health check.
+  }
+}
+
+export type PublishedBeats =
+  | { known: false }
+  | { known: true; instance: string; writerSilentMs: number; ages: Record<string, number>; stalled: Stall[] };
+
+export async function readPublishedBeats(now = Date.now()): Promise<PublishedBeats> {
+  const { readFile } = await import("node:fs/promises");
+  const { dataFile } = await import("./paths");
+
+  let parsed: BeatsFile;
+  try {
+    parsed = JSON.parse(await readFile(dataFile(HEARTBEAT_FILE), "utf8")) as BeatsFile;
+  } catch {
+    return { known: false };
+  }
+
+  const ages: Record<string, number> = {};
+  const stalled: Stall[] = [];
+
+  for (const [loop, at] of Object.entries(parsed.beats ?? {})) {
+    const silentForMs = now - new Date(at).getTime();
+    ages[loop] = Math.round(silentForMs / 1000);
+    const toleranceMs = TOLERANCE_MS[loop as LoopName];
+    if (toleranceMs && silentForMs > toleranceMs) stalled.push({ loop: loop as LoopName, silentForMs, toleranceMs });
+  }
+
+  return {
+    known: true,
+    instance: parsed.instance,
+    writerSilentMs: now - new Date(parsed.at).getTime(),
+    ages,
+    stalled,
+  };
 }
 
 /**

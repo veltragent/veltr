@@ -10,7 +10,7 @@ import { acquireLease, keepLease, leaseHolder, INSTANCE_ID } from "./lease";
 import { kvAvailable } from "./kv";
 import { backupNow, describeCensus, restoreIfEmpty } from "./backup";
 import { notifyOwner } from "./owner";
-import { beat, classifyBoot, publishBeacon, stalledLoops, watchLoopHealth, BEACON_INTERVAL_MS, type LoopName } from "./heartbeat";
+import { beat, classifyBoot, publishBeacon, publishBeats, stalledLoops, watchLoopHealth, BEACON_INTERVAL_MS, type LoopName } from "./heartbeat";
 
 /**
  * In-process background scheduler.
@@ -216,6 +216,9 @@ async function watchdogLoop() {
   for (;;) {
     await new Promise((r) => setTimeout(r, BEACON_INTERVAL_MS));
     await publishBeacon();
+    // Where the health endpoint can read them: it answers in a different
+    // process, so an in-memory map would be invisible to it.
+    await publishBeats();
 
     const stalled = stalledLoops();
     const names = new Set(stalled.map((s) => s.loop));
