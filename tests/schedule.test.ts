@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import {
   compareRun,
   extractFigures,
+  figureMoved,
+  isRateKey,
+  MATERIAL_RATE_POINTS,
   fingerprintRun,
   isDue,
   materiallyDifferent,
@@ -30,7 +33,7 @@ function schedule(overrides: Partial<Schedule> = {}): Schedule {
     objective: "why is the NVDA premium where it is",
     intervalSec: 3600,
     fingerprint: null,
-    lastFigures: [],
+    lastFigures: {},
     lastSummary: null,
     lastRunAt: null,
     lastChangedAt: null,
@@ -72,37 +75,121 @@ function mission(summaries: string[]): Mission {
 
 /* ------------------------------------------------------------ Figures */
 
-test("figures are read out of the observations", () => {
-  assert.deepEqual(extractFigures('{"price":226.06,"liquidity":1401755}'), [226.06, 1401755]);
+test("figures are read out of the observations under their own names", () => {
+  assert.deepEqual({ ...extractFigures('{"price":226.06,"liquidity":1401755}') }, {
+    price: 226.06,
+    liquidity: 1401755,
+  });
+});
+
+test("nested figures keep the path they were found at", () => {
+  const figures = extractFigures('{"globalCrypto":{"btcDominance":56.11},"chain":{"stockTokens":95}}');
+  assert.equal(figures["globalCrypto.btcDominance"], 56.11);
+  assert.equal(figures["chain.stockTokens"], 95);
+});
+
+test("prose still yields figures, by position", () => {
+  const figures = extractFigures("the price is 226.06 and liquidity 1401755");
+  assert.deepEqual(Object.values(figures), [226.06, 1401755]);
 });
 
 test("timestamps are not figures", () => {
   // A run's own clock would otherwise make every comparison differ.
   const figures = extractFigures('{"at":"2026-08-15T00:00:00.000Z","price":226.06}');
-  assert.ok(!figures.some((n) => n > 1e11), "epoch-scale numbers are excluded");
-  assert.ok(figures.includes(226.06));
+  assert.ok(!Object.values(figures).some((n) => n > 1e11), "epoch-scale numbers are excluded");
+  assert.ok(Object.values(figures).includes(226.06));
 });
 
 test("a move under the threshold is not a change", () => {
   // 226.06 → 226.09 between hourly runs is not news.
-  assert.equal(materiallyDifferent([226.06], [226.09]), false);
-  assert.equal(materiallyDifferent([226.06], [240.0]), true);
+  assert.equal(materiallyDifferent({ price: 226.06 }, { price: 226.09 }), false);
+  assert.equal(materiallyDifferent({ price: 226.06 }, { price: 240.0 }), true);
   assert.equal(MATERIAL_CHANGE, 0.02);
 });
 
-test("a different number of figures is itself a change", () => {
+test("a different set of figures is itself a change", () => {
   // Usually a source dropped out or a new one answered.
-  assert.equal(materiallyDifferent([1, 2], [1, 2, 3]), true);
+  assert.equal(materiallyDifferent({ a: 1, b: 2 }, { a: 1, b: 2, c: 3 }), true);
+  assert.equal(materiallyDifferent({ a: 1, b: 2 }, { a: 1, c: 2 }), true);
+});
+
+test("figures are matched by name, not by position", () => {
+  // A source returning its fields in a different order returned the same numbers.
+  assert.equal(materiallyDifferent({ price: 226.06, liq: 1 }, { liq: 1, price: 226.06 }), false);
 });
 
 test("values near zero do not produce infinite relative change", () => {
-  assert.equal(materiallyDifferent([0], [0]), false);
-  assert.equal(materiallyDifferent([0], [1e-12]), false);
+  assert.equal(materiallyDifferent({ x: 0 }, { x: 0 }), false);
+  assert.equal(materiallyDifferent({ x: 0 }, { x: 1e-12 }), false);
 });
 
-test("the same figures fingerprint the same", () => {
-  assert.equal(fingerprintRun([1, 2, 3]), fingerprintRun([1, 2, 3]));
-  assert.notEqual(fingerprintRun([1, 2, 3]), fingerprintRun([1, 2, 4]));
+test("the same figures fingerprint the same regardless of key order", () => {
+  assert.equal(fingerprintRun({ a: 1, b: 2 }), fingerprintRun({ b: 2, a: 1 }));
+  assert.notEqual(fingerprintRun({ a: 1, b: 2 }), fingerprintRun({ a: 1, b: 3 }));
+});
+
+/* -------------------------------------------------------------- Rates */
+
+test("a rate that barely moved is not a change, however large the ratio", () => {
+  // The bug that made this necessary: an hourly 24h-change figure drifting from
+  // -0.0621% to -0.0538% is 13% relative and eight thousandths of a point real.
+  assert.equal(figureMoved("exchangeChangePct", -0.0621, -0.0538), false);
+  assert.equal(figureMoved("premiumPct", 0.01776, 0.01821), false);
+});
+
+test("a rate that genuinely moved is a change", () => {
+  assert.equal(figureMoved("exchangeChangePct", -0.06, -6.5), true);
+  assert.equal(figureMoved("globalCrypto.btcDominance", 56.11, 60.0), true);
+});
+
+test("the absolute floor applies only to rates", () => {
+  // Otherwise a token trading at $0.0177 could double unnoticed — magnitude
+  // alone cannot tell a cheap price from a ratio, which is why the key is read.
+  assert.equal(figureMoved("onChainPrice", 0.01776, 0.03552), true);
+  assert.equal(figureMoved("premiumPct", 0.01776, 0.03552), false);
+  assert.equal(MATERIAL_RATE_POINTS, 0.25);
+});
+
+test("rate-like keys are recognised by name", () => {
+  for (const key of ["premiumPct", "exchangeChangePct", "btcDominance", "spread", "apy"]) {
+    assert.equal(isRateKey(key), true, key);
+  }
+  for (const key of ["exchangePrice", "liquidityUsd", "volume24hUsd", "stockTokens"]) {
+    assert.equal(isRateKey(key), false, key);
+  }
+});
+
+test("a quiet market does not wake anyone", () => {
+  // The exact reading a live get_price returned, against a plausible one an hour
+  // later: price +0.05%, liquidity +0.09%, nothing happened. Compared without
+  // names this fired, because the derived percentage moved 13% against itself.
+  const before = extractFigures(
+    '{"symbol":"NVDA","exchangePrice":225.16,"exchangeChangePct":-0.0621,"previousClose":225.3,' +
+      '"onChainPrice":225.2,"premiumPct":0.01776514478593061,"liquidityUsd":1364619.17,"volume24hUsd":459305.56}'
+  );
+  const after = extractFigures(
+    '{"symbol":"NVDA","exchangePrice":225.28,"exchangeChangePct":-0.0538,"previousClose":225.3,' +
+      '"onChainPrice":225.31,"premiumPct":0.01821,"liquidityUsd":1365900.02,"volume24hUsd":459812.11}'
+  );
+
+  assert.notEqual(fingerprintRun(before), fingerprintRun(after), "the reading did change");
+  assert.equal(materiallyDifferent(before, after), false, "but not in any way worth a message");
+});
+
+test("a real move on the same reading is still caught", () => {
+  const before = extractFigures(
+    '{"exchangePrice":225.16,"exchangeChangePct":-0.0621,"liquidityUsd":1364619.17}'
+  );
+  const crash = extractFigures(
+    '{"exchangePrice":198.40,"exchangeChangePct":-11.9,"liquidityUsd":1361200.00}'
+  );
+  assert.equal(materiallyDifferent(before, crash), true);
+
+  // And a drain of liquidity, with the price untouched.
+  const drained = extractFigures(
+    '{"exchangePrice":225.16,"exchangeChangePct":-0.0621,"liquidityUsd":402000.00}'
+  );
+  assert.equal(materiallyDifferent(before, drained), true);
 });
 
 /* ---------------------------------------------------------- Comparison */
@@ -146,7 +233,7 @@ test("a real move is reported", () => {
 });
 
 test("a run that observed nothing is not a change", () => {
-  const c = compareRun(schedule({ fingerprint: "abc", lastFigures: [1] }), mission(["no numbers here"]));
+  const c = compareRun(schedule({ fingerprint: "abc", lastFigures: { price: 1 } }), mission(["no numbers here"]));
   assert.equal(c.changed, false);
   assert.equal(c.reason, "no-evidence");
 });
@@ -257,7 +344,7 @@ test("a failed run counts towards pausing rather than retrying forever", async (
 
 test("a run with no evidence does not overwrite the last good baseline", async () => {
   const h = harness({
-    schedules: [schedule({ fingerprint: "keepme", lastFigures: [226.06] })],
+    schedules: [schedule({ fingerprint: "keepme", lastFigures: { price: 226.06 } })],
     summaries: ["nothing numeric at all"],
   });
 

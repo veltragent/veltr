@@ -75,7 +75,7 @@ export async function addSchedule(
       objective: trimmed,
       intervalSec: interval,
       fingerprint: null,
-      lastFigures: [],
+      lastFigures: {},
       lastSummary: null,
       lastRunAt: null,
       lastChangedAt: null,
