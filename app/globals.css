@@ -131,3 +131,18 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/*
+ * A strip that scrolls without announcing it.
+ *
+ * The header nav is wider than a phone and scrolls inside itself; a scrollbar
+ * across a 64px-tall bar is louder than the thing it describes. Scrolling still
+ * works by touch and by wheel — only the bar is hidden, never the overflow.
+ */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

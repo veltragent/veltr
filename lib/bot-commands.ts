@@ -594,7 +594,6 @@ CHANGE TRACKING
 /track vercel/next.js   a repository — tells you when a commit lands
 /track https://…        a page — tells you when the words change
 /tracks                 what you are tracking
-/portfolio <address>    tokenised shares an address holds
 /untrack <target>       stop
 
 TOKEN WATCH

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { SiteHeader, SiteFooter } from "@/components/site-chrome";
+import { SiteHeader, SiteFooter, TELEGRAM_URL } from "@/components/site-chrome";
+import { TelegramMark } from "@/components/marks";
 import { Display, Eyebrow, SeverityBadge, StatTile, TokenMark } from "@/components/primitives";
 import { getSnapshot } from "@/lib/snapshot";
 import { fetchCorporateActions, summariseActions } from "@/lib/events";
@@ -32,7 +33,7 @@ export default async function HomePage() {
         {/* ---------------------------------------------------------- Hero */}
         <section className="mx-auto max-w-6xl px-6 pt-20 pb-16">
           <div className="max-w-3xl">
-            <Eyebrow>Robinhood Chain · ERC-8056 · Chain ID 4663</Eyebrow>
+            <Eyebrow>Built on Robinhood Chain · ERC-8056</Eyebrow>
             <Display as="h1" className="mt-5 text-[clamp(2.75rem,6.5vw,4.5rem)]">
               Your balance is fixed.
               <br />
@@ -434,6 +435,86 @@ export default async function HomePage() {
         </section>
 
         {/* ------------------------------------------------------------ CTA */}
+        {/* ------------------------------------------------- How it works */}
+        {/*
+          The only place the loop is described. Docs link here rather than
+          restating it — one explanation that can be kept true is worth more
+          than two that drift apart.
+        */}
+        <section id="how-it-works" className="border-t border-line bg-paper-edge/40">
+          <div className="mx-auto max-w-6xl px-6 py-20">
+            <Eyebrow>Veltr Agent · How it works</Eyebrow>
+            <Display className="mt-4 max-w-3xl text-[clamp(1.9rem,3.6vw,2.75rem)]">
+              Five steps, and it can stop at any of them.
+            </Display>
+            <p className="mt-5 max-w-2xl text-[15px] leading-relaxed text-ink-soft">
+              A question becomes a plan, not a single lookup. Each step writes down what it did, so
+              the answer at the end can be traced back to the calls that produced it.
+            </p>
+
+            <ol className="mt-12 grid gap-4 lg:grid-cols-5">
+              {[
+                {
+                  step: "Observe",
+                  body: "Works out which tools the question needs and calls them — often several at once. Chain reads, market data, a repository, a page. Everything that comes back is written to a ledger with an id.",
+                },
+                {
+                  step: "Reason",
+                  body: "Reads only what is in that ledger. If the evidence does not answer the question it says so and gathers more, rather than filling the gap with something plausible.",
+                },
+                {
+                  step: "Decide",
+                  body: "Picks the next action and scores its own confidence. Anything consequential stops here and waits for you — approval is a message you send, not a setting you leave on.",
+                },
+                {
+                  step: "Act",
+                  body: "Only inside the permission you granted, and only actions it declared in advance. Reading is free; changing anything is not.",
+                },
+                {
+                  step: "Verify",
+                  body: "A second, independent read confirms the world is in the state the action claimed. A step with no way to check is reported as unverified — never as done.",
+                },
+              ].map((item, i) => (
+                <li key={item.step} className="rounded-xl border border-line bg-paper p-5">
+                  <p className="tnum text-[12px] text-ink-faint">0{i + 1}</p>
+                  <p className="mt-2 font-[family-name:var(--font-display)] text-[1.25rem] tracking-[-0.02em] text-ink">
+                    {item.step}
+                  </p>
+                  <p className="mt-3 text-[13px] leading-relaxed text-ink-muted">{item.body}</p>
+                </li>
+              ))}
+            </ol>
+
+            <div className="mt-10 flex flex-wrap items-start gap-6 rounded-xl border border-line bg-paper p-6">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line text-ink">
+                <TelegramMark className="h-6 w-6" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="font-[family-name:var(--font-display)] text-[1.25rem] tracking-[-0.02em] text-ink">
+                  Why it lives in Telegram
+                </p>
+                <p className="mt-3 max-w-3xl text-[13px] leading-relaxed text-ink-muted">
+                  Because the useful half of this is the half that reaches you when you are not
+                  looking. An alert is worthless in a browser tab that is closed, and the warning
+                  window before a corporate action lands on this chain is about ten minutes. Telegram
+                  already sits on the phone, already pushes, and needs no account, no wallet
+                  connection and no signature — so watching something costs one message. The website
+                  is where you read; the bot is where it reaches you.
+                </p>
+                <a
+                  href={TELEGRAM_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 inline-flex items-center gap-2 rounded-lg border border-line-strong px-4 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-cream-deep"
+                >
+                  <TelegramMark className="h-4 w-4" />
+                  Open Veltr Agent in Telegram
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section className="border-t border-line">
           <div className="mx-auto max-w-6xl px-6 py-20 text-center">
             <Display className="mx-auto max-w-2xl text-[clamp(1.9rem,4vw,2.9rem)]">

@@ -52,3 +52,7 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# Local scratch — screen recordings and notes for a bug being worked on.
+# Never committed: these are large, and they are recordings of a real session.
+problem/

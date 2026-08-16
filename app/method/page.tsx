@@ -141,7 +141,7 @@ redemptions        50 maximum`}</Code>
             {[
               ["Multiplier state, effective timestamps, balances", "Direct eth_call against Robinhood Chain mainnet, batched through Multicall3"],
               ["Token discovery, holder counts, USD price, 24h volume, logos", "Blockscout public API — no key required"],
-              ["Chain identity", "Chain ID 4663 · Arbitrum Orbit L2 · Ethereum blob data availability"],
+              ["Chain identity", "Robinhood Chain · Arbitrum Orbit L2 · Ethereum blob data availability"],
               ["Agent narration", "Free-tier Groq or Gemini, constrained to the chain read above; falls back to deterministic output when no key is present"],
             ].map(([label, source]) => (
               <li key={label} className="grid gap-1 border-b border-line-soft pb-3 sm:grid-cols-[1fr_1.2fr] sm:gap-6">

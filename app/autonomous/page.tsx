@@ -64,7 +64,7 @@ export default async function AutonomousPage() {
           <StatTile
             label="Scoped implementations live"
             value={String(scoped)}
-            detail="Verified deployed on chain 4663"
+            detail="Verified deployed on Robinhood Chain"
           />
           <StatTile
             label="Worst case if the key leaks"
@@ -147,7 +147,7 @@ export default async function AutonomousPage() {
 
         {/* --------------------------------------------- Implementations */}
         <section className="mt-12">
-          <Eyebrow>Delegate implementations on chain 4663</Eyebrow>
+          <Eyebrow>Delegate implementations</Eyebrow>
           <div className="mt-5 overflow-hidden rounded-xl border border-line bg-paper">
             <div className="hidden grid-cols-[1.6fr_1fr_1fr_2.4fr] gap-4 border-b border-line bg-paper-edge/60 px-5 py-3 lg:grid">
               {["Implementation", "Deployed", "Scoping", "Note"].map((h) => (
