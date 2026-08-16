@@ -1,4 +1,6 @@
+import Image from "next/image";
 import Link from "next/link";
+import logoMark from "@/public/logo-mark.png";
 import { GithubMark, TelegramMark, XMark } from "./marks";
 import { MobileNav } from "./mobile-nav";
 
@@ -6,9 +8,27 @@ export const GITHUB_URL = "https://github.com/veltragent/veltr";
 export const X_URL = "https://x.com/veltragent";
 export const TELEGRAM_URL = "https://t.me/veltragent_bot";
 
+/**
+ * The mark and the name, as one thing.
+ *
+ * Aligned on centres rather than baselines: the mark has no baseline, and
+ * hanging a symbol off the wordmark's would sit it low. The height is tuned to
+ * the wordmark's cap height so neither dominates — a logo that towers over the
+ * name it belongs to is the usual tell of one that was added late.
+ *
+ * `priority` because this is above the fold on every page, and an empty box
+ * where the brand goes is the one image worth loading first.
+ */
 function Wordmark() {
   return (
-    <Link href="/" className="group flex shrink-0 items-baseline gap-2">
+    <Link href="/" className="group flex shrink-0 items-center gap-2.5">
+      <Image
+        src={logoMark}
+        alt=""
+        aria-hidden="true"
+        priority
+        className="h-[22px] w-auto sm:h-[25px]"
+      />
       <span className="font-[family-name:var(--font-display)] text-[1.6rem] leading-none tracking-[-0.03em] text-ink">
         Veltr Agent
       </span>
@@ -100,9 +120,13 @@ export function SiteFooter() {
       <div className="mx-auto max-w-6xl px-6 py-10">
         <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
           <div className="max-w-md">
-            <p className="font-[family-name:var(--font-display)] text-lg tracking-[-0.02em] text-ink">
-              Veltr Agent
-            </p>
+            {/* The same lockup as the header, quieter. Opens and closes the page. */}
+            <div className="flex items-center gap-2">
+              <Image src={logoMark} alt="" aria-hidden="true" className="h-[18px] w-auto" />
+              <p className="font-[family-name:var(--font-display)] text-lg tracking-[-0.02em] text-ink">
+                Veltr Agent
+              </p>
+            </div>
             <p className="mt-2 text-[13px] leading-relaxed text-ink-muted">
               An autonomous analyst for Robinhood Chain. Every number here was read from mainnet or a
               named market source at the time shown — nothing is estimated. Informational tooling

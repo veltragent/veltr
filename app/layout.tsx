@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Instrument_Serif, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -46,6 +46,20 @@ export const metadata: Metadata = {
     description:
       "Your balance is fixed. Your ownership is not. An autonomous analyst for Robinhood Chain that never reports a number it did not fetch.",
   },
+  applicationName: "Veltr Agent",
+};
+
+/**
+ * The colour a browser paints its own chrome with.
+ *
+ * The same cream the page starts on, so the address bar on a phone and the tab
+ * strip on a desktop continue the page rather than framing it in white. There
+ * is no dark variant because the site has one palette; offering a second here
+ * would be inventing a brand colour that appears nowhere else.
+ */
+export const viewport: Viewport = {
+  themeColor: "#f7f2e7",
+  colorScheme: "light",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { buildPremiumWall } from "@/lib/premium-wall";
 import { MAX_PREMIUM_PCT } from "@/lib/watch/settings";
@@ -39,6 +41,11 @@ const RULE = "#e3d7c1";
  * all; the number is real but it describes nothing anyone could act on.
  */
 const MIN_CREDIBLE_VOLUME_USD = 5_000;
+
+/** Read from disk and embedded: ImageResponse has no origin to resolve a path against. */
+const markDataUri = `data:image/png;base64,${readFileSync(
+  join(process.cwd(), "public/logo-mark.png")
+).toString("base64")}`;
 
 function pct(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "—";
@@ -89,8 +96,12 @@ export default async function Image() {
         }}
       >
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <div style={{ fontSize: 22, letterSpacing: 4, color: SOFT, textTransform: "uppercase" }}>
-            Veltr Agent · Robinhood Chain
+          {/* The same lockup as the homepage card and the site header. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={markDataUri} alt="" width={34} height={37} />
+            <span style={{ fontSize: 27, letterSpacing: "-0.02em", color: INK }}>Veltr Agent</span>
+            <span style={{ fontSize: 20, color: SOFT }}>· Robinhood Chain</span>
           </div>
           <div style={{ fontSize: 56, marginTop: 14, lineHeight: 1.05, maxWidth: 760 }}>
             Two prices for the same company
