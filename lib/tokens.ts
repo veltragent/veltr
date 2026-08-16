@@ -71,6 +71,20 @@ const DISCOVERY_TTL = 30 * 60_000;
  * largest multiplier on the chain, serves its logo from CoinGecko rather than
  * Robinhood's CDN and would be dropped by any such heuristic.
  */
+/**
+ * Everything the probe has ever confirmed, for the life of the process.
+ *
+ * A contract that answered `uiMultiplier()` once will answer it again —
+ * membership of this set does not lapse. So a probe that comes back short can
+ * only ever be missing tokens, never disproving them, and the right response to
+ * a partial answer is to add what it found rather than to believe what it
+ * omitted.
+ *
+ * A token that has genuinely gone is still dropped: the snapshot skips anything
+ * whose multiplier cannot be read at the next stage.
+ */
+const confirmedStockTokens = new Map<string, bigint>();
+
 async function discoverStockTokens(): Promise<Map<string, bigint>> {
   return cached(
     "erc8056-set",
@@ -79,22 +93,44 @@ async function discoverStockTokens(): Promise<Map<string, bigint>> {
       const erc20s = await fetchErc20Tokens();
       const addresses = erc20s.map((t) => t.address_hash);
 
-      let found = await probeErc8056(addresses);
+      let probe = await probeErc8056(addresses);
 
-      // The probe is ~600 contract calls in one pass; a throttled provider can
-      // return nothing at all. Retry once through the unmetered public endpoint
-      // before accepting an empty answer.
-      if (found.length === 0 && addresses.length > 0) {
-        console.warn("[veltr] ERC-8056 probe returned nothing; retrying via public RPC");
-        found = await probeErc8056(addresses, { usePublicFallback: true });
+      /*
+       * The probe is ~600 contract calls in one pass, and a throttled provider
+       * drops them silently: the calls come back failed and the addresses
+       * simply do not appear. Retry through the unmetered public endpoint when
+       * that happens, not only when the answer is empty.
+       *
+       * This is the bug it exists for. A throttled pass once returned 44 of the
+       * 95 tokens on the chain, and the old guard — reject an empty set — was
+       * satisfied by 44. The site served two fifths of the chain for the full
+       * thirty-minute cache window, with nothing anywhere reporting a fault.
+       */
+      if (probe.failed > 0 && addresses.length > 0) {
+        console.warn(
+          `[veltr] ERC-8056 probe: ${probe.failed}/${probe.checked} calls failed; retrying via public RPC`
+        );
+        const retry = await probeErc8056(addresses, { usePublicFallback: true });
+        if (retry.failed < probe.failed) probe = retry;
       }
 
-      return new Map(found.map((f) => [f.address.toLowerCase(), f.uiMultiplier]));
+      for (const f of probe.found) confirmedStockTokens.set(f.address.toLowerCase(), f.uiMultiplier);
+
+      if (probe.failed > 0) {
+        console.warn(
+          `[veltr] discovery incomplete (${probe.failed} calls unanswered); serving ${confirmedStockTokens.size} known tokens`
+        );
+      }
+
+      return { tokens: new Map(confirmedStockTokens), complete: probe.failed === 0 };
     },
-    // An empty set means the probe failed, not that the chain has no stock
-    // tokens. Never let that become the cached answer.
-    (set) => set.size > 0
-  );
+    /*
+     * Only a complete pass is worth keeping for half an hour. An incomplete one
+     * is still returned — the union above means it is never worse than what was
+     * already known — but it is not allowed to settle in as the answer.
+     */
+    (result) => result.complete && result.tokens.size > 0
+  ).then((r) => r.tokens);
 }
 
 function classify(multiplier: number, pending: number | null, effectiveAt: number | null) {
@@ -235,13 +271,28 @@ async function computeRadarSnapshot(): Promise<RadarSnapshot> {
 
   for (const t of candidates) {
     const state = stateByAddress.get(t.address_hash.toLowerCase());
-    // No multiplier means it does not implement ERC-8056 — not a stock token.
-    if (!state?.uiMultiplier) continue;
 
-    const multiplier = Number(state.uiMultiplier) / Number(WAD);
-    const pendingRaw = state.newUIMultiplier;
+    /*
+     * A node that would not answer is not a token that does not exist.
+     *
+     * Discovery already confirmed this contract implements ERC-8056, and that
+     * does not lapse, so an unreachable read falls back to the multiplier the
+     * probe recorded. Dropping it instead is how a throttled pass used to
+     * delete tokens from the chain: the count fell from 95 to 38 with no error
+     * anywhere, which is exactly what it looks like when a token is delisted.
+     */
+    const known = confirmedStockTokens.get(t.address_hash.toLowerCase());
+    const raw = state?.uiMultiplier ?? (state?.unreachable ? known ?? null : null);
+
+    // No multiplier and the node did answer: it does not implement ERC-8056.
+    if (!raw) continue;
+
+    const multiplier = Number(raw) / Number(WAD);
+    // Null where the node did not answer, which classify() reads as "nothing
+    // queued" rather than inventing a schedule from a failed read.
+    const pendingRaw = state?.newUIMultiplier ?? null;
     const pendingMultiplier = pendingRaw !== null ? Number(pendingRaw) / Number(WAD) : null;
-    const effectiveAt = state.effectiveAt ? Number(state.effectiveAt) : null;
+    const effectiveAt = state?.effectiveAt ? Number(state.effectiveAt) : null;
 
     const c = classify(multiplier, pendingMultiplier, effectiveAt);
 

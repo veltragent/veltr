@@ -95,10 +95,25 @@ const MULTICALL_BATCH = 8192;
  * This is the authoritative test — no name matching, no icon heuristics, no
  * hardcoded registry — so newly listed symbols are picked up automatically.
  */
+export type Erc8056Probe = {
+  found: { address: Address; uiMultiplier: bigint }[];
+  /** Contracts asked. */
+  checked: number;
+  /**
+   * Calls the node refused, dropped or timed out.
+   *
+   * Reported because without it a throttled call is indistinguishable from a
+   * contract that simply does not implement the interface — both arrive as an
+   * address missing from `found`. A partial probe then looks exactly like a
+   * chain with fewer stock tokens on it.
+   */
+  failed: number;
+};
+
 export async function probeErc8056(
   addresses: Address[],
   options: { usePublicFallback?: boolean } = {}
-) {
+): Promise<Erc8056Probe> {
   const client = options.usePublicFallback ? logsClient : publicClient;
 
   const results = await client.multicall({
@@ -108,13 +123,24 @@ export async function probeErc8056(
   });
 
   const found: { address: Address; uiMultiplier: bigint }[] = [];
+  let failed = 0;
+
   addresses.forEach((address, i) => {
     const r = results[i];
-    if (r.status === "success" && typeof r.result === "bigint" && r.result > 0n) {
-      found.push({ address, uiMultiplier: r.result });
+    if (r.status === "success") {
+      if (typeof r.result === "bigint" && r.result > 0n) found.push({ address, uiMultiplier: r.result });
+      return;
     }
+    /*
+     * A contract without the function reverts, and viem reports that as a
+     * failure too — so a revert is counted only when it is not the ordinary
+     * "this is not a stock token" answer. Anything else is the node refusing.
+     */
+    const name = (r.error as { name?: string } | undefined)?.name ?? "";
+    if (name !== "ContractFunctionExecutionError" && name !== "ContractFunctionRevertedError") failed++;
   });
-  return found;
+
+  return { found, checked: addresses.length, failed };
 }
 
 /**
@@ -146,12 +172,28 @@ export async function readMultiplierState(addresses: Address[]) {
       results[i * PER + 2],
       results[i * PER + 3],
     ];
+
+    /*
+     * Whether the node answered at all.
+     *
+     * Without this the caller cannot tell a token that has no multiplier from
+     * one the node refused to read, and the snapshot drops both. A throttled
+     * pass then removes tokens from the chain rather than reporting a fault —
+     * the same failure the discovery probe had, one stage further down.
+     */
+    const name = (cur.error as { name?: string } | undefined)?.name ?? "";
+    const unreachable =
+      cur.status === "failure" &&
+      name !== "ContractFunctionExecutionError" &&
+      name !== "ContractFunctionRevertedError";
+
     return {
       address,
       uiMultiplier: cur.status === "success" ? (cur.result as bigint) : null,
       newUIMultiplier: next.status === "success" ? (next.result as bigint) : null,
       effectiveAt: eff.status === "success" ? (eff.result as bigint) : null,
       totalSupplyUI: supply.status === "success" ? (supply.result as bigint) : null,
+      unreachable,
     };
   });
 }

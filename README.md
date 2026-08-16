@@ -18,7 +18,7 @@
 <p align="center">
   <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-1f1a14?style=flat-square">
   <img alt="TypeScript strict" src="https://img.shields.io/badge/TypeScript-strict-1f1a14?style=flat-square">
-  <img alt="394 tests" src="https://img.shields.io/badge/tests-394%20passing-3f6b4a?style=flat-square">
+  <img alt="394 tests" src="https://img.shields.io/badge/tests-401%20passing-3f6b4a?style=flat-square">
   <img alt="Zero test dependencies" src="https://img.shields.io/badge/test%20deps-0-8b7c68?style=flat-square">
 </p>
 
