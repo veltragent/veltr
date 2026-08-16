@@ -125,3 +125,41 @@ test("nothing about who uses the product is exposed", async () => {
     assert.ok(!text.toLowerCase().includes(leak.toLowerCase()), `${leak} must not appear`);
   }
 });
+
+/* ------------------------------------------ Two hosts, one codebase */
+
+test("a read-only host that never writes is not degraded by that", async () => {
+  // Both dataDir() and the flag are read per call, so no fresh module is needed.
+  // The website runs this same code with the scheduler off and a read-only
+  // filesystem. Judged by the requirement that belongs to the agent, the public
+  // site answered 503 to every request, permanently, for a condition that could
+  // never be otherwise there.
+  // Earlier tests deliberately parked a loop in the stalled state; clear it, or
+  // this asserts on that rather than on storage.
+  beat("watch", Date.now());
+  beat("telegram", Date.now());
+
+  process.env.VELTR_SCHEDULER = "off";
+  process.env.VELTR_DATA_DIR = `/definitely/not/writable/${Date.now()}`;
+  try {
+    const report = await healthReport();
+    assert.equal(report.body.storage, "unwritable", "still reported");
+    assert.equal(report.httpStatus, 200, "but not counted against a host that never writes");
+  } finally {
+    delete process.env.VELTR_SCHEDULER;
+  }
+});
+
+test("a host that does write is still failed by unwritable storage", async () => {
+  // On the agent this is the failure that loses every subscriber on the next
+  // deploy, and it has to stay loud.
+  beat("watch", Date.now());
+  beat("telegram", Date.now());
+
+  delete process.env.VELTR_SCHEDULER;
+  process.env.VELTR_DATA_DIR = `/definitely/not/writable/${Date.now()}`;
+
+  const report = await healthReport();
+  assert.equal(report.body.storage, "unwritable");
+  assert.equal(report.httpStatus, 503);
+});

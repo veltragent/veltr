@@ -69,7 +69,25 @@ export async function healthReport(): Promise<HealthReport> {
     writerSilent = published.writerSilentMs > BEATS_STALE_MS;
   }
 
-  const healthy = storage === "writable" && stalled.length === 0 && !writerSilent;
+  /**
+   * Storage only counts against a host that writes.
+   *
+   * The same code serves two of them. On the agent, a state directory it cannot
+   * write to is the failure that loses every subscriber on the next deploy, and
+   * it must be loud. On the website the filesystem is read-only by design, the
+   * scheduler is switched off, and nothing is ever persisted — every page is
+   * built from live chain and market reads.
+   *
+   * Applying the agent's requirement to both made the public site answer 503 to
+   * every request, permanently, for a condition that could never be otherwise
+   * there. The state is still reported either way; what changes is whether it
+   * is treated as a fault. The flag is the one the scheduler itself reads, so
+   * the two cannot disagree about which host this is.
+   */
+  const persists = process.env.VELTR_SCHEDULER !== "off";
+  const storageOk = storage === "writable" || !persists;
+
+  const healthy = storageOk && stalled.length === 0 && !writerSilent;
 
   return {
     httpStatus: healthy ? 200 : 503,

@@ -58,8 +58,14 @@ const NAV = [
  *
  * Making that row scroll sideways fixed the overflow but not the problem: six
  * of the nine sections sat off the edge with nothing to indicate they were
- * there. Below `md` the links now live behind a menu instead, which is the
- * difference between hidden and merely closed.
+ * there. Below the breakpoint the links now live behind a menu instead, which
+ * is the difference between hidden and merely closed.
+ *
+ * That breakpoint is `lg`, not `md`, and the difference is measured rather than
+ * chosen: the row needs 860px — 678 for the links, 118 for the lockup, 64 for
+ * the page gutter and the gap. `md` turns it on at exactly 768, so every width
+ * from 768 to 859 rendered the full row into a space too small for it and every
+ * page scrolled sideways. An iPad held upright is 768.
  *
  * `relative` on the header is what the open panel positions against.
  */
@@ -69,7 +75,7 @@ export function SiteHeader() {
       <div className="relative mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-6">
         <Wordmark />
 
-        <nav className="hidden items-center gap-1 md:flex">
+        <nav className="hidden items-center gap-1 lg:flex">
           {NAV.map((item) => (
             <Link
               key={item.href}

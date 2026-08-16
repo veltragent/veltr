@@ -11,6 +11,9 @@ import { useEffect, useState } from "react";
  * the site behind a gesture nobody is told about — six of the nine sections
  * were off the edge of the screen with nothing to suggest they existed.
  *
+ * Shown below `lg`, matching the header: the full row does not fit until 860px,
+ * so tablets get this too.
+ *
  * The reason this is a client component rather than a `<details>` element: on a
  * client-side navigation the App Router keeps the DOM, so a disclosure menu
  * stays open behind the page it just took you to. Closing has to be driven by
@@ -51,7 +54,7 @@ export function MobileNav({ items }: { items: NavItem[] }) {
   }, [open]);
 
   return (
-    <div className="md:hidden">
+    <div className="lg:hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
