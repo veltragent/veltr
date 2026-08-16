@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { GithubMark, TelegramMark, XMark } from "./marks";
+import { MobileNav } from "./mobile-nav";
 
 export const GITHUB_URL = "https://github.com/veltragent/veltr";
 export const X_URL = "https://x.com/veltragent";
@@ -30,27 +31,25 @@ const NAV = [
 /**
  * Site header.
  *
- * The nav scrolls inside itself rather than widening the page. Before this it
- * was a plain flex row of nine links, which on a phone is about three hundred
- * pixels wider than the viewport — and because flex items do not shrink below
- * their text, that width propagated to the document. The browser then zoomed
- * out to fit, which is why every page rendered squeezed into two thirds of the
- * screen with the text pushed off the left edge.
+ * Nine links do not fit on a phone. As a plain flex row they made the document
+ * about three hundred pixels wider than the viewport — flex items do not shrink
+ * below their own text — and the browser zoomed out to fit, which rendered
+ * every page squeezed into two thirds of the screen.
  *
- * `min-w-0` is the load-bearing class: a flex child defaults to `min-width:
- * auto`, so without it the nav still refuses to be narrower than its contents
- * and `overflow-x-auto` never engages.
+ * Making that row scroll sideways fixed the overflow but not the problem: six
+ * of the nine sections sat off the edge with nothing to indicate they were
+ * there. Below `md` the links now live behind a menu instead, which is the
+ * difference between hidden and merely closed.
  *
- * No menu button, no JavaScript, no open/closed state to get stuck: on a
- * client-side navigation the DOM persists, so a disclosure menu would stay open
- * behind the page you just moved to.
+ * `relative` on the header is what the open panel positions against.
  */
 export function SiteHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-cream/85 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-6">
+      <div className="relative mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-6">
         <Wordmark />
-        <nav className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto md:justify-end">
+
+        <nav className="hidden items-center gap-1 md:flex">
           {NAV.map((item) => (
             <Link
               key={item.href}
@@ -61,6 +60,8 @@ export function SiteHeader() {
             </Link>
           ))}
         </nav>
+
+        <MobileNav items={NAV} />
       </div>
     </header>
   );
