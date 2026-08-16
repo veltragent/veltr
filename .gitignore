@@ -56,3 +56,7 @@ next-env.d.ts
 # Local scratch — screen recordings and notes for a bug being worked on.
 # Never committed: these are large, and they are recordings of a real session.
 problem/
+
+# Launch assets: banners, video. Large binaries regenerated from scripts,
+# and not part of what the site or the agent needs to run.
+twitter/
