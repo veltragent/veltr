@@ -1,11 +1,31 @@
-# Veltr
+<p align="center">
+  <img src=".github/banner.png" alt="Veltr Agent" width="100%">
+</p>
 
-A market terminal for **Robinhood Chain** — the Arbitrum L2 where US equities
-trade as ERC-8056 tokens, 24 hours a day, while the exchanges behind them are
-shut most of the week.
+<p align="center">
+  US equities trade on <b>Robinhood Chain</b> as tokens that never rebase.<br>
+  A split moves an on-chain multiplier and your balance does not change at all —<br>
+  so every wallet reading <code>balanceOf</code> reports a position that is wrong.
+</p>
 
-Two products from one data layer: a website that is worth linking to, and a
-Telegram agent that answers and acts.
+<p align="center">
+  <a href="https://veltragent.com"><b>Website</b></a> ·
+  <a href="https://veltragent.com/docs"><b>Documentation</b></a> ·
+  <a href="https://t.me/veltragent_bot"><b>Telegram bot</b></a> ·
+  <a href="https://veltragent.com/market"><b>Live premiums</b></a>
+</p>
+
+<p align="center">
+  <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-1f1a14?style=flat-square">
+  <img alt="TypeScript strict" src="https://img.shields.io/badge/TypeScript-strict-1f1a14?style=flat-square">
+  <img alt="394 tests" src="https://img.shields.io/badge/tests-394%20passing-3f6b4a?style=flat-square">
+  <img alt="Zero test dependencies" src="https://img.shields.io/badge/test%20deps-0-8b7c68?style=flat-square">
+</p>
+
+---
+
+Two products from one data layer: a website worth linking to, and a Telegram
+agent that answers and acts.
 
 ---
 
@@ -28,8 +48,8 @@ split already applied — so a raw balance understates real holdings by 300%.
 
 Each token has an on-chain price set by pool liquidity and an exchange price set
 by NASDAQ or NYSE. The gap is the premium, and it widens every night and weekend
-because only one of the two markets ever closes. `/market` shows all 95 tokens
-against their real listings.
+because only one of the two markets ever closes. `/market` prices every one of them
+against its real listing.
 
 ---
 
@@ -51,8 +71,9 @@ calendar need no credentials at all.
 
 | Route | Purpose |
 | --- | --- |
-| `/` | The mechanism, live evidence, the three intervention tiers |
-| `/market` | Premium wall — all 95 stock tokens against their listings |
+| `/` | The mechanism, live evidence, and how the agent works |
+| `/docs` | Reference: purpose, every command, and what it refuses |
+| `/market` | Premium wall — every stock token against its listing |
 | `/explorer` | Every asset on the chain, ranked by real activity |
 | `/radar` | Multiplier state ranked by reporting error |
 | `/history` | Every corporate action the chain has recorded |
@@ -70,15 +91,16 @@ The bot is not a command menu with an LLM bolted on. It decides which tools to
 call, calls several when a question needs them, and acts — sending a chart,
 changing an alert scope — instead of telling the user which command to type.
 
-**24 tools.** Read tools return live data. Act tools change only what the caller
+**33 tools.** Read tools return live data. Act tools change only what the caller
 owns — their chat, their subscription — and are all reversible.
 
 ```
-/price  /chart  /premium  /token  /news  /market  /splits
-/chain  /flow   /delegation
-/mission  /missions
-/watch  /watches  /unwatch  /settings
-/status /help   /stop
+MARKET     /price  /chart  /premium  /token  /news  /market  /splits
+CHAIN      /chain  /flow   /portfolio  /delegation
+MISSIONS   /mission  /missions  /every  /schedules  /unschedule
+WATCH      /watch  /watches  /unwatch  /settings
+TRACKING   /track  /tracks  /untrack
+SESSION    /status  /cancel  /help  /stop
 ```
 
 Or plain language: *"why is NVDA above its stock price?"*, *"show me the AAPL
@@ -118,7 +140,7 @@ reported as *unverified*, never as success.
 **Bounded three ways** — iterations, tool calls, wall clock — because an agent
 that decides when to stop can decide not to. Identical calls are deduplicated,
 results are truncated, and the whole registry is never offered at once: routing
-cuts 31 tools to the handful an objective implies.
+cuts 33 tools to the handful an objective implies.
 
 A mission waiting for approval is persisted, so the answer can arrive hours later
 in a different process.
@@ -174,7 +196,7 @@ distinct tokens is one call per provider.
 | Chain RPC + Multicall3 | Multiplier state, balances | Public endpoint is rate-limited |
 | Blockscout | Token discovery, holders, price, logos | — |
 | Codex | Aggregate liquidity, flow, OHLCV, full token list | **No ranked holder list on this plan** |
-| DexScreener | Pair price, liquidity, volume, price windows, trade counts | 300 req/min, per IP; figures are single-pool |
+| DexScreener | Price, liquidity, volume, trade counts | 300 req/min, per IP. The batch endpoint takes 30 addresses but caps the reply at 30 *pairs*, so totals must be fetched per token |
 | GeckoTerminal | Candles, pool discovery, batched prices, aggregate reserve | 30 calls/min, per IP; 30 addresses per batch; no market cap without a CoinGecko listing |
 | Yahoo Finance | Underlying equity price | Unofficial; may return nothing |
 | Finnhub | Profiles, analysts, earnings, session state | **`/stock/split` withheld on free tier** |
@@ -209,6 +231,21 @@ Single-instance only.
 **Watching starts no process.** `/watch` appends a row; the next monitoring cycle
 picks it up. So the number of timers never grows with the number of users, and a
 restart resumes every watch from disk with nothing lost.
+
+**Market figures are derived, not taken.** Blockscout publishes price, volume and
+market cap as precomputed fields, and they do not survive checking: for NVDA it
+reported $1.22M of 24h volume against $4.00M actually traded, and a market cap
+that disagrees with its own supply times its own price. Price and pool totals
+come from the pools themselves, summed across every pair the token is the base
+of; market cap is `totalSupplyUI × price`. The raw supply would be wrong by
+exactly the multiplier after a corporate action — the misreporting this project
+exists to catch, and therefore the one place it must not appear.
+
+**A premium needs a market, not just a price.** Thirty-eight tokens trade in no
+indexed pool; their only price is derived from the share, so comparing the two
+is nearly circular. Below $10,000 of pool depth a $250 trade moves the price
+five percent. Both are excluded, which is the difference between a dislocation
+and a rounding artefact with a large number attached.
 
 ---
 
