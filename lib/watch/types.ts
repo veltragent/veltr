@@ -29,6 +29,30 @@ export type TokenMarketData = {
   pairAddress: string | null;
   dex: string | null;
   url: string | null;
+  /**
+   * Percent the token trades above (+) or below (−) the underlying equity.
+   *
+   * Null for anything that is not a tokenised stock, and for a stock whose
+   * equity quote could not be read this cycle.
+   */
+  premiumPct: number | null;
+  /**
+   * True when the equity market is shut, so the reference is the last close.
+   *
+   * The number is still reported — people ask what the premium is at midnight
+   * — but it is drift against a stale price rather than a tradeable spread, and
+   * nothing alerts on it.
+   */
+  premiumIsStale: boolean;
+  /**
+   * The underlying share price the premium was measured against.
+   *
+   * Carried so an alert can show its own arithmetic. “NVDA is 3.6% cheap” is a
+   * claim; “$217.05 against a share at $225.16” is the same claim with the two
+   * numbers that make it checkable, which is the difference between an alert
+   * someone can act on and one they have to go and verify.
+   */
+  equityPriceUsd: number | null;
   /** Every provider that contributed at least one field to this record. */
   source: MarketSource[];
   updatedAt: string;
@@ -55,6 +79,9 @@ export function emptyMarketData(address: string, source: MarketSource): TokenMar
     pairAddress: null,
     dex: null,
     url: null,
+    premiumPct: null,
+    premiumIsStale: true,
+    equityPriceUsd: null,
     source: [source],
     updatedAt: new Date().toISOString(),
   };
@@ -89,6 +116,15 @@ export type WatchSettings = {
   liquidityBelow: Threshold;
   volumeAbove: Threshold;
   volumeBelow: Threshold;
+  /**
+   * Premium over the underlying equity, in percentage points, that fires.
+   *
+   * Signed on purpose: +2 means the token is trading two percent above the real
+   * share, −3 means three percent below it. The discount side is the one people
+   * actually watch for — it is the direction the arbitrage runs.
+   */
+  premiumAbove: Threshold;
+  premiumBelow: Threshold;
   /** Seconds between checks for this user's watches. */
   checkIntervalSec: number;
   /** Seconds of silence enforced after any alert on a given watch. */
@@ -113,6 +149,8 @@ export type ArmState = {
   liquidityBelow: boolean;
   volumeAbove: boolean;
   volumeBelow: boolean;
+  premiumAbove: boolean;
+  premiumBelow: boolean;
 };
 
 export type AlertKind = keyof ArmState;

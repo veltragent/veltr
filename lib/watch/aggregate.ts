@@ -26,7 +26,15 @@ export const CHAIN_ID = 4663;
  * volume is chain-wide for the token — larger numbers describing a different
  * thing, useful when DexScreener has nothing but wrong to mix in silently.
  */
-const PRIORITY: Record<keyof Omit<TokenMarketData, "address" | "source" | "updatedAt">, MarketSource[]> = {
+/*
+ * Premium is absent on purpose. It is not reported by any pool provider — it is
+ * computed against an equity quote after the merge — so giving it a source list
+ * here would claim a provenance it does not have.
+ */
+const PRIORITY: Record<
+  keyof Omit<TokenMarketData, "address" | "source" | "updatedAt" | "premiumPct" | "premiumIsStale" | "equityPriceUsd">,
+  MarketSource[]
+> = {
   symbol: ["dexscreener", "geckoterminal", "onchain"],
   name: ["dexscreener", "geckoterminal", "onchain"],
   price: ["dexscreener", "geckoterminal"],

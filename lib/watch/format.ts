@@ -159,6 +159,8 @@ const HEADLINE: Record<AlertKind, string> = {
   liquidityBelow: "⚠️ LIQUIDITY ALERT",
   volumeAbove: "📊 VOLUME ALERT",
   volumeBelow: "📉 VOLUME ALERT",
+  premiumAbove: "🔺 PREMIUM ALERT",
+  premiumBelow: "🔻 DISCOUNT ALERT",
 };
 
 /**
@@ -172,8 +174,28 @@ export function renderAlert(alert: Alert): string {
   const { market } = alert;
   const label = alert.symbol ? `$${alert.symbol}` : alert.tokenAddress.slice(0, 10) + "…";
 
+  /**
+   * A premium alert shows its own arithmetic.
+   *
+   * The percentage alone is a claim. The token price beside the share price it
+   * was measured against is the same claim with the two numbers that make it
+   * checkable — and it is the pair someone needs anyway to decide whether the
+   * spread is worth acting on.
+   */
+  const premiumHead = () => [
+    `${HEADLINE[alert.kind]} ${label}`,
+    "",
+    `Premium: ${formatPct(alert.value)}`,
+    `Token: ${formatPrice(market.priceUsd)}`,
+    `Share: ${formatPrice(market.equityPriceUsd)}`,
+    "",
+    `Threshold: ${alert.threshold > 0 ? "+" : "−"}${Math.abs(alert.threshold)}%`,
+  ];
+
   const head =
-    alert.kind === "priceUp" || alert.kind === "priceDown"
+    alert.kind === "premiumAbove" || alert.kind === "premiumBelow"
+      ? premiumHead()
+      : alert.kind === "priceUp" || alert.kind === "priceDown"
       ? [
           `${HEADLINE[alert.kind]} ${label}`,
           "",
@@ -215,6 +237,8 @@ const METRIC_LABEL: Record<AlertKind, string> = {
   liquidityBelow: "Liquidity",
   volumeAbove: "24h Volume",
   volumeBelow: "24h Volume",
+  premiumAbove: "Premium",
+  premiumBelow: "Premium",
 };
 
 /* ------------------------------------------------------------- Settings */

@@ -30,6 +30,15 @@ export const PRICE_REARM_FRACTION = 0.5;
  */
 export const LEVEL_REARM_BAND = 0.05;
 
+/**
+ * Re-arm band for premium, in percentage points.
+ *
+ * A fixed distance rather than a fraction of the threshold, because the metric
+ * is already a percentage and can sit near zero. The spread has to genuinely
+ * close by a quarter of a point before the same alert can fire again.
+ */
+export const PREMIUM_REARM_POINTS = 0.25;
+
 export const ALL_KINDS: AlertKind[] = [
   "priceUp",
   "priceDown",
@@ -39,6 +48,8 @@ export const ALL_KINDS: AlertKind[] = [
   "liquidityBelow",
   "volumeAbove",
   "volumeBelow",
+  "premiumAbove",
+  "premiumBelow",
 ];
 
 export function fullyArmed(): ArmState {
@@ -51,6 +62,8 @@ export function fullyArmed(): ArmState {
     liquidityBelow: true,
     volumeAbove: true,
     volumeBelow: true,
+    premiumAbove: true,
+    premiumBelow: true,
   };
 }
 
@@ -117,10 +130,58 @@ function conditionsFor(
     if (value === null || threshold === null) {
       return { kind, value, threshold, crossed: false, rearmed: false };
     }
-    const band = threshold * LEVEL_REARM_BAND;
+    // Magnitude, not the signed value: a negative threshold would otherwise
+    // produce a negative band and re-arm in the wrong direction — which for a
+    // dollar level never happened, since none of them can be negative.
+    const band = Math.abs(threshold) * LEVEL_REARM_BAND;
     return direction === "above"
       ? { kind, value, threshold, crossed: value >= threshold, rearmed: value <= threshold - band }
       : { kind, value, threshold, crossed: value <= threshold, rearmed: value >= threshold + band };
+  };
+
+  /**
+   * Premium against the underlying equity.
+   *
+   * Not `level`, for two reasons. The metric is signed — a discount is a
+   * negative premium, and "alert below −3%" is the arbitrage case people
+   * actually want — and it is already a percentage, so a re-arm band expressed
+   * as a fraction of the threshold would be a fraction of a percentage. At a
+   * threshold of 0.5% that band is 0.025 points, which the number crosses back
+   * and forth on noise alone and fires again every cycle.
+   *
+   * So the band is a fixed number of percentage points, the unit the metric is
+   * already in.
+   *
+   * When the equity market is shut the reading is suppressed entirely: the
+   * reference price is the last close, so the "premium" is drift against a
+   * stale number rather than a spread anyone could trade. Returning neither
+   * crossed nor re-armed leaves the arm state untouched, so a position held at
+   * the close resumes at the open rather than re-firing on the same spread.
+   */
+  const premiumCondition = (
+    kind: "premiumAbove" | "premiumBelow",
+    threshold: number | null,
+    direction: "above" | "below"
+  ): Condition => {
+    const value = market.premiumPct;
+    if (value === null || threshold === null || market.premiumIsStale) {
+      return { kind, value, threshold, crossed: false, rearmed: false };
+    }
+    return direction === "above"
+      ? {
+          kind,
+          value,
+          threshold,
+          crossed: value >= threshold,
+          rearmed: value <= threshold - PREMIUM_REARM_POINTS,
+        }
+      : {
+          kind,
+          value,
+          threshold,
+          crossed: value <= threshold,
+          rearmed: value >= threshold + PREMIUM_REARM_POINTS,
+        };
   };
 
   const priceCondition = (kind: "priceUp" | "priceDown", threshold: number | null): Condition => {
@@ -142,6 +203,8 @@ function conditionsFor(
     level("liquidityBelow", market.liquidity, settings.liquidityBelow, "below"),
     level("volumeAbove", market.volume24h, settings.volumeAbove, "above"),
     level("volumeBelow", market.volume24h, settings.volumeBelow, "below"),
+    premiumCondition("premiumAbove", settings.premiumAbove, "above"),
+    premiumCondition("premiumBelow", settings.premiumBelow, "below"),
   ];
 }
 
@@ -255,6 +318,11 @@ export function resyncArmState(watch: TokenWatch, settings: WatchSettings): Toke
     priceUsd: watch.lastPrice,
     marketCap: watch.lastMarketCap,
     fdv: null,
+    // No equity quote is read here — the point of a resync is that it costs no
+    // provider call — so premium is unknown, which leaves its arm state alone.
+    premiumPct: null,
+    premiumIsStale: true,
+    equityPriceUsd: null,
     liquidity: watch.lastLiquidity,
     volume24h: watch.lastVolume,
     priceChange5m: null,

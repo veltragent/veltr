@@ -2,6 +2,7 @@ import { evaluateWatch, type Alert } from "./alerts";
 import { fetchSourceReadings, readingFor, type SourceReadings } from "./aggregate";
 import { renderAlert } from "./format";
 import { listAllWatches, getSettingsFor, persistCycle } from "./store";
+import { fetchPremiums, type PremiumReadingLite } from "./premium";
 import { DEFAULT_SETTINGS } from "./settings";
 import type { TokenWatch, WatchSettings } from "./types";
 
@@ -30,6 +31,8 @@ export type EngineDeps = {
     addresses: string[],
     sources: Pick<WatchSettings, "useDexScreener" | "useGeckoTerminal">
   ) => Promise<SourceReadings>;
+  /** Premium per address, for the tokens whose watchers asked for it. */
+  fetchPremiums: (addresses: string[]) => Promise<Map<string, PremiumReadingLite>>;
   persist: (watches: TokenWatch[]) => Promise<void>;
   send: (userId: string, text: string) => Promise<boolean>;
   now: () => Date;
@@ -64,6 +67,7 @@ function defaultDeps(): EngineDeps {
     loadSettings: getSettingsFor,
     fetchReadings: (addresses, sources) =>
       fetchSourceReadings(addresses, { settings: { ...DEFAULT_SETTINGS, ...sources } }),
+    fetchPremiums: (addresses) => fetchPremiums(addresses),
     persist: persistCycle,
     send: async (userId, text) => {
       // A watch alert is a push. If an owner is configured, only they get one —
@@ -134,6 +138,29 @@ export async function runWatchCycle(overrides: Partial<EngineDeps> = {}): Promis
 
   const readings = await deps.fetchReadings(addresses, sources);
 
+  /**
+   * Premium, for the tokens where anyone is actually watching it.
+   *
+   * Every constraint here is about not spending an equity quote nobody asked
+   * for. The pool providers do not report premium; it needs a second call to an
+   * equity feed, per symbol, and this cycle ticks every fifteen seconds.
+   *
+   * So: only tokens whose watcher has set a premium threshold, only when the
+   * equity market is open — a closed market makes the alert impossible anyway,
+   * which removes the cost overnight and at weekends entirely — and deduplicated
+   * by symbol, exactly as the token readings are by address.
+   */
+  const wantsPremium = new Set(
+    due
+      .filter((w) => {
+        const s = settingsFor(w.userId);
+        return s.premiumAbove !== null || s.premiumBelow !== null;
+      })
+      .map((w) => w.tokenAddress.toLowerCase())
+  );
+
+  const premiums = wantsPremium.size > 0 ? await deps.fetchPremiums([...wantsPremium]) : new Map();
+
   const updated: TokenWatch[] = [];
   const alertsByUser = new Map<string, Alert[]>();
 
@@ -149,7 +176,17 @@ export async function runWatchCycle(overrides: Partial<EngineDeps> = {}): Promis
       continue;
     }
 
-    const result = evaluateWatch(watch, market, settings, now);
+    const premium = premiums.get(watch.tokenAddress.toLowerCase());
+    const withPremium = premium
+      ? {
+          ...market,
+          premiumPct: premium.premiumPct,
+          premiumIsStale: premium.isStale,
+          equityPriceUsd: premium.equityPriceUsd,
+        }
+      : market;
+
+    const result = evaluateWatch(watch, withPremium, settings, now);
     updated.push(result.watch);
     report.suppressed += result.suppressedByCooldown.length;
 

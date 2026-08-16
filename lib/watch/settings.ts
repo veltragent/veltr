@@ -17,6 +17,10 @@ export const DEFAULT_SETTINGS: WatchSettings = {
   liquidityBelow: null,
   volumeAbove: null,
   volumeBelow: null,
+  // Off until asked for. A premium alert is only meaningful on a tokenised
+  // stock, and firing one unprompted on every watched token would be noise.
+  premiumAbove: null,
+  premiumBelow: null,
   checkIntervalSec: 30,
   alertCooldownSec: 15 * 60,
   useDexScreener: true,
@@ -41,6 +45,18 @@ export const MAX_PCT = 100_000;
 export const MAX_MONEY = 1e15;
 
 export const PCT_PRESETS = [1, 5, 10, 20, 50];
+
+/**
+ * Premium bounds, in percentage points, and signed.
+ *
+ * A tokenised share trading 50% away from its underlying is not a spread, it is
+ * a broken feed or the wrong instrument — and an alert threshold out there
+ * would never fire, which is a worse outcome than being told the number is
+ * implausible.
+ */
+export const MAX_PREMIUM_PCT = 50;
+export const PREMIUM_ABOVE_PRESETS = [0.5, 1, 2, 5];
+export const PREMIUM_BELOW_PRESETS = [-0.5, -1, -2, -5];
 export const INTERVAL_PRESETS_SEC = [15, 30, 60, 300, 900];
 export const COOLDOWN_PRESETS_SEC = [0, 300, 900, 3600, 6 * 3600];
 export const MONEY_PRESETS = [10_000, 50_000, 100_000, 500_000, 1_000_000];
@@ -54,6 +70,8 @@ export type NumericField =
   | "liquidityBelow"
   | "volumeAbove"
   | "volumeBelow"
+  | "premiumAbove"
+  | "premiumBelow"
   | "checkIntervalSec"
   | "alertCooldownSec";
 
@@ -66,12 +84,25 @@ export const FIELD_LABELS: Record<NumericField, string> = {
   liquidityBelow: "Liquidity Below",
   volumeAbove: "24h Volume Above",
   volumeBelow: "24h Volume Below",
+  premiumAbove: "Premium Above",
+  premiumBelow: "Premium Below",
   checkIntervalSec: "Check Interval",
   alertCooldownSec: "Alert Cooldown",
 };
 
 /** Percentage fields read as percentages; the rest are US dollars or seconds. */
-export const FIELD_UNIT: Record<NumericField, "pct" | "usd" | "sec"> = {
+/**
+ * "spct" is a signed percentage, and it exists because premium is the only
+ * field here whose sign carries meaning.
+ *
+ * Every other percentage stores its direction in the field name and its
+ * magnitude in the value — priceDownPct of 10 means "down 10%". Premium cannot
+ * work that way: −3 means the token is three percent *cheaper* than the share it
+ * represents, which is the direction the arbitrage actually runs, and dropping
+ * that sign would turn "tell me when it goes cheap" into a threshold that is
+ * true almost all of the time.
+ */
+export const FIELD_UNIT: Record<NumericField, "pct" | "spct" | "usd" | "sec"> = {
   priceUpPct: "pct",
   priceDownPct: "pct",
   marketCapAbove: "usd",
@@ -80,6 +111,8 @@ export const FIELD_UNIT: Record<NumericField, "pct" | "usd" | "sec"> = {
   liquidityBelow: "usd",
   volumeAbove: "usd",
   volumeBelow: "usd",
+  premiumAbove: "spct",
+  premiumBelow: "spct",
   checkIntervalSec: "sec",
   alertCooldownSec: "sec",
 };
@@ -139,6 +172,17 @@ export function validateField(field: NumericField, value: number): ValidationRes
       return { ok: false, error: `Enter a percentage between ${MIN_PCT} and ${MAX_PCT}.` };
     }
     return { ok: true, value: magnitude };
+  }
+
+  if (unit === "spct") {
+    // The sign is preserved here, unlike every other percentage — see FIELD_UNIT.
+    if (value === 0 || Math.abs(value) > MAX_PREMIUM_PCT || Math.abs(value) < MIN_PCT) {
+      return {
+        ok: false,
+        error: `Enter a premium between -${MAX_PREMIUM_PCT} and +${MAX_PREMIUM_PCT}. Negative means below the share price: -3 fires when the token trades 3% cheaper than the stock.`,
+      };
+    }
+    return { ok: true, value };
   }
 
   if (unit === "usd") {
@@ -226,6 +270,10 @@ export function formatFieldValue(field: NumericField, settings: WatchSettings): 
   switch (FIELD_UNIT[field]) {
     case "pct":
       return `${field === "priceDownPct" ? "−" : "+"}${value}%`;
+    // The sign is the value here, not the field name — a premium of −3 reads as
+    // −3% however it is displayed.
+    case "spct":
+      return `${value > 0 ? "+" : "−"}${Math.abs(value)}%`;
     case "usd":
       return formatUsd(value);
     default:

@@ -5,6 +5,8 @@ import {
   INTERVAL_PRESETS_SEC,
   MONEY_PRESETS,
   PCT_PRESETS,
+  PREMIUM_ABOVE_PRESETS,
+  PREMIUM_BELOW_PRESETS,
   formatDuration,
   formatFieldValue,
   formatUsd,
@@ -108,6 +110,8 @@ export function settingsKeyboard(settings: WatchSettings): InlineKeyboard {
       [field("📈 MC ABOVE", "marketCapAbove"), field("📉 MC BELOW", "marketCapBelow")],
       [field("💧 LIQ ABOVE", "liquidityAbove"), field("💧 LIQ BELOW", "liquidityBelow")],
       [field("📊 VOL ABOVE", "volumeAbove"), field("📊 VOL BELOW", "volumeBelow")],
+      // Only meaningful on a tokenised stock, which is most of this chain.
+      [field("🔺 PREM ABOVE", "premiumAbove"), field("🔻 PREM BELOW", "premiumBelow")],
       [field("⏱ INTERVAL", "checkIntervalSec"), field("🔕 COOLDOWN", "alertCooldownSec")],
       [
         {
@@ -131,6 +135,8 @@ function presetsFor(field: NumericField): number[] {
   switch (FIELD_UNIT[field]) {
     case "pct":
       return PCT_PRESETS;
+    case "spct":
+      return field === "premiumAbove" ? PREMIUM_ABOVE_PRESETS : PREMIUM_BELOW_PRESETS;
     case "usd":
       return MONEY_PRESETS;
     default:
@@ -142,6 +148,9 @@ function presetLabel(field: NumericField, value: number): string {
   switch (FIELD_UNIT[field]) {
     case "pct":
       return `${field === "priceDownPct" ? "−" : "+"}${value}%`;
+    // Signed, so the sign is the value rather than the field name.
+    case "spct":
+      return `${value > 0 ? "+" : "−"}${Math.abs(value)}%`;
     case "usd":
       return formatUsd(value);
     default:
