@@ -22,6 +22,23 @@ const CONCURRENCY = 10;
  */
 export const UNLISTED_UNDERLYING = new Set(["SPCX"]);
 
+/**
+ * Depth a pool needs before its price is worth comparing to a share.
+ *
+ * A premium is a claim about what the market pays. In a constant-product pool
+ * holding $10,000, a $250 trade moves the price five percent — so below this,
+ * the "premium" is one small trade, not a market, and reporting it as a spread
+ * invites someone to act on nothing.
+ *
+ * Measured, not guessed: of the fifty-six tokens with a pool, twenty-two hold
+ * less than this and several hold a few hundred dollars. Those were producing
+ * the widest numbers on the board — NVTS at +56% on $390 of liquidity, POET at
+ * +43% on $140 with no trades at all — which put dust at the top of a page
+ * whose whole purpose is to show real dislocation. SNDK, genuinely 25% below
+ * its share, holds $455k and is unaffected.
+ */
+export const MIN_POOL_LIQUIDITY_USD = 10_000;
+
 export type WallRow = {
   symbol: string;
   name: string;
@@ -95,8 +112,29 @@ export async function buildPremiumWall(): Promise<PremiumWall> {
           multiplier: t.multiplier,
           tokenPriceUsd: tokenPrice,
           equityPriceUsd: equityPrice,
+          /**
+           * A premium needs a market price, not just a price.
+           *
+           * Thirty-eight of the ninety-five tokens trade in no indexed pool at
+           * all. The only price they have is Blockscout's, and sampled against
+           * the shares themselves it lands within a few percent every time —
+           * because it is derived from them. A "premium" computed from that is
+           * very nearly the share divided by itself: it says nothing about what
+           * anyone would pay on chain, and where the derivation goes wrong it
+           * says something false and loud. CRWD, whose entire raw supply is one
+           * token, was being published at a premium of +291%.
+           *
+           * So the gap is only reported where there is a pool to have set the
+           * price. The token price is still shown; what is withheld is the
+           * comparison, which is the number that would have been believed.
+           */
           premiumPct:
-            !unlisted && tokenPrice !== null && equityPrice !== null && equityPrice > 0
+            !unlisted &&
+            t.priceSource === "dex" &&
+            (t.liquidityUsd ?? 0) >= MIN_POOL_LIQUIDITY_USD &&
+            tokenPrice !== null &&
+            equityPrice !== null &&
+            equityPrice > 0
               ? (tokenPrice / equityPrice - 1) * 100
               : null,
           marketCapUsd: t.marketCap,

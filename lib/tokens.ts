@@ -1,7 +1,8 @@
 import type { Address } from "viem";
-import { fetchErc20Tokens } from "./blockscout";
+import { fetchErc20Tokens, type BlockscoutToken } from "./blockscout";
 import { probeErc8056, readMultiplierState, WAD } from "./chain";
 import { cached } from "./cache";
+import { fetchDexQuotes, type DexQuote } from "./market";
 
 /**
  * `scheduled` — a corporate action is queued on-chain and has not landed yet.
@@ -21,6 +22,11 @@ export type StockToken = {
   priceUsd: number | null;
   volume24h: number | null;
   marketCap: number | null;
+  /** Summed across every pool this token is the base of. */
+  liquidityUsd: number | null;
+  poolCount: number;
+  /** Which of the two the figures above came from, so the page can say. */
+  priceSource: "dex" | "blockscout";
 
   multiplier: number;
   pendingMultiplier: number | null;
@@ -145,13 +151,84 @@ export async function buildRadarSnapshot(options: { fresh?: boolean } = {}): Pro
   );
 }
 
+/**
+ * Price, liquidity, volume and market cap for one token.
+ *
+ * Blockscout publishes all four as precomputed fields and every one of them was
+ * being trusted verbatim. Checked against the pools they claim to describe, they
+ * do not hold up: for NVDA it reported $1.22M of 24h volume against $4.00M
+ * actually traded, and a market cap of $3.887M that disagrees with its own
+ * supply times its own price ($4.013M). Across tokens the error ran +7.8%,
+ * +3.2%, −20.7%, −9.6%, and CRWD came back as a market cap of zero while
+ * holding supply.
+ *
+ * So the figures are derived here instead, from data this process fetched:
+ * price and the pool totals from DexScreener, supply from the chain.
+ *
+ * Market cap uses `totalSupplyUI`. The raw supply is wrong by exactly the
+ * multiplier after a corporate action — the same misreporting this product
+ * exists to warn people about, which makes it the one place it must not appear.
+ *
+ * Blockscout is still the fallback where there is no pool at all: a token with
+ * no liquidity has no DEX price, and a stale figure is better than an empty
+ * column as long as nothing else is derived from it.
+ */
+function priced(
+  t: BlockscoutToken,
+  state: { totalSupplyUI: bigint | null } | undefined,
+  quote: DexQuote | null
+): Pick<StockToken, "priceUsd" | "volume24h" | "marketCap" | "liquidityUsd" | "poolCount" | "priceSource"> {
+  const decimals = Number(t.decimals ?? 18);
+  const supplyUI =
+    state?.totalSupplyUI != null ? Number(state.totalSupplyUI) / 10 ** decimals : null;
+
+  if (!quote) {
+    /**
+     * No indexed pool at all — thirty-eight of the ninety-five.
+     *
+     * Blockscout's price is then the only one there is, and it holds up:
+     * sampled against the shares themselves it lands within a few percent,
+     * which is what a tokenised stock should do. Its *market cap* still does
+     * not, so that is computed here from the same supply and the same price
+     * rather than taken from a field that disagrees with both.
+     *
+     * Liquidity stays null. No pool is indexed, so there is no figure to give,
+     * and a zero would read as "none" rather than "not known".
+     */
+    const price = num(t.exchange_rate);
+    return {
+      priceUsd: price,
+      volume24h: num(t.volume_24h),
+      marketCap: supplyUI !== null && price !== null ? supplyUI * price : null,
+      liquidityUsd: null,
+      poolCount: 0,
+      priceSource: "blockscout",
+    };
+  }
+
+  return {
+    priceUsd: quote.priceUsd,
+    volume24h: quote.volume24hUsd,
+    liquidityUsd: quote.liquidityUsd,
+    poolCount: quote.poolCount,
+    // Null rather than a guess when the supply could not be read: a market cap
+    // is a product of two numbers and inventing either one is worse than a dash.
+    marketCap: supplyUI !== null ? supplyUI * quote.priceUsd : null,
+    priceSource: "dex",
+  };
+}
+
 async function computeRadarSnapshot(): Promise<RadarSnapshot> {
   const [erc20s, stockSet] = await Promise.all([fetchErc20Tokens(), discoverStockTokens()]);
 
   const candidates = erc20s.filter((t) => stockSet.has(t.address_hash.toLowerCase()));
   const addresses = candidates.map((t) => t.address_hash);
 
-  const states = await readMultiplierState(addresses);
+  // One multicall for the chain state, four batched requests for the pools.
+  const [states, quotes] = await Promise.all([
+    readMultiplierState(addresses),
+    fetchDexQuotes(addresses).catch(() => new Map()),
+  ]);
   const stateByAddress = new Map(states.map((s) => [s.address.toLowerCase(), s]));
 
   const tokens: StockToken[] = [];
@@ -175,9 +252,7 @@ async function computeRadarSnapshot(): Promise<RadarSnapshot> {
       decimals: Number(t.decimals ?? 18),
       iconUrl: t.icon_url,
       holders: Number(t.holders_count ?? 0),
-      priceUsd: num(t.exchange_rate),
-      volume24h: num(t.volume_24h),
-      marketCap: num(t.circulating_market_cap),
+      ...priced(t, state, quotes.get(t.address_hash.toLowerCase()) ?? null),
       multiplier,
       pendingMultiplier,
       effectiveAt,

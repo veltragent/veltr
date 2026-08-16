@@ -72,6 +72,7 @@ export const erc8056Abi = [
     outputs: [{ type: "uint256" }],
   },
   { type: "function", name: "totalSupplyUI", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "totalSupply", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   {
     type: "event",
     name: "UIMultiplierUpdated",
@@ -125,6 +126,10 @@ export async function readMultiplierState(addresses: Address[]) {
     { address, abi: erc8056Abi, functionName: "uiMultiplier" } as const,
     { address, abi: erc8056Abi, functionName: "newUIMultiplier" } as const,
     { address, abi: erc8056Abi, functionName: "effectiveAt" } as const,
+    // Effective supply, for a market cap that means what it says. `totalSupply`
+    // is the raw figure and is wrong by exactly the multiplier after a split —
+    // the same trap that makes `balanceOf` misreport a holding.
+    { address, abi: erc8056Abi, functionName: "totalSupplyUI" } as const,
   ]);
 
   const results = await publicClient.multicall({
@@ -133,13 +138,20 @@ export async function readMultiplierState(addresses: Address[]) {
     batchSize: MULTICALL_BATCH,
   });
 
+  const PER = 4;
   return addresses.map((address, i) => {
-    const [cur, next, eff] = [results[i * 3], results[i * 3 + 1], results[i * 3 + 2]];
+    const [cur, next, eff, supply] = [
+      results[i * PER],
+      results[i * PER + 1],
+      results[i * PER + 2],
+      results[i * PER + 3],
+    ];
     return {
       address,
       uiMultiplier: cur.status === "success" ? (cur.result as bigint) : null,
       newUIMultiplier: next.status === "success" ? (next.result as bigint) : null,
       effectiveAt: eff.status === "success" ? (eff.result as bigint) : null,
+      totalSupplyUI: supply.status === "success" ? (supply.result as bigint) : null,
     };
   });
 }

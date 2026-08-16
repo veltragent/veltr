@@ -41,15 +41,23 @@ async function getJson<T>(url: string, timeoutMs = 15_000): Promise<T | null> {
 /* ------------------------------------------------------------------ DEX */
 
 export type DexQuote = {
+  /** Price from the deepest pool — the venue least moved by one trade. */
   priceUsd: number;
+  /** Summed across every pool this token is the base of. */
   liquidityUsd: number;
+  /** Summed the same way. */
   volume24hUsd: number;
   priceChange24h: number | null;
   buys24h: number;
   sells24h: number;
+  /** The deepest pool, for a chart or a link that needs one venue. */
   pairAddress: string;
   quoteSymbol: string;
   dex: string;
+  /** How many pools the totals are drawn from. */
+  poolCount: number;
+  /** What the deepest one holds, so the spread across venues stays visible. */
+  deepestLiquidityUsd: number;
 };
 
 type DsPair = {
@@ -66,9 +74,52 @@ type DsPair = {
 };
 
 /**
- * Deepest pool wins. A thin pool's price is noise, so the quote is taken from
- * whichever venue actually has the liquidity to defend it.
+ * Turns the pools a token trades in into one reading.
+ *
+ * Price comes from the deepest pool: a thin pool's price is noise, so the quote
+ * is taken from whichever venue has the liquidity to defend it.
+ *
+ * Liquidity and volume are sums, because they belong to the token rather than
+ * to one venue. They used to be read off the deepest pair alone — right for a
+ * price, wrong for a total. NVDA trades in twenty-seven pools here: the deepest
+ * holds $1.38M of $2.58M and did $415k of the $4.00M traded in a day, so those
+ * two figures were reported at 53% and 10% of the truth.
+ *
+ * Callers must pass base-side pairs only. DexScreener also returns pools where
+ * the token is the *quote* side, and their `priceUsd` is some other token's —
+ * for NVDA that is three pools which would have added $888k of somebody else's
+ * money to the liquidity.
  */
+export function quoteFromPairsForTests(pairs: DsPair[]): DexQuote | null {
+  return quoteFromPairs(pairs);
+}
+
+function quoteFromPairs(pairs: DsPair[]): DexQuote | null {
+  if (pairs.length === 0) return null;
+
+  const best = [...pairs].sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
+  const price = Number(best.priceUsd);
+  if (!Number.isFinite(price) || price <= 0) return null;
+
+  const sum = (pick: (p: DsPair) => number | undefined | null) =>
+    pairs.reduce((total, p) => total + (Number(pick(p)) || 0), 0);
+
+  return {
+    priceUsd: price,
+    liquidityUsd: sum((p) => p.liquidity?.usd),
+    volume24hUsd: sum((p) => p.volume?.h24),
+    priceChange24h: best.priceChange?.h24 ?? null,
+    buys24h: sum((p) => p.txns?.h24?.buys),
+    sells24h: sum((p) => p.txns?.h24?.sells),
+    // The deepest pool, for anything that needs one venue: the chart, the link.
+    pairAddress: best.pairAddress,
+    quoteSymbol: best.quoteToken?.symbol ?? "?",
+    dex: best.dexId ?? "?",
+    poolCount: pairs.length,
+    deepestLiquidityUsd: best.liquidity?.usd ?? 0,
+  };
+}
+
 export async function fetchDexQuote(tokenAddress: string): Promise<DexQuote | null> {
   return cached(
     `dex:${tokenAddress.toLowerCase()}`,
@@ -80,26 +131,45 @@ export async function fetchDexQuote(tokenAddress: string): Promise<DexQuote | nu
           p.chainId === "robinhood" &&
           p.baseToken?.address?.toLowerCase() === tokenAddress.toLowerCase()
       );
-      if (pairs.length === 0) return null;
-
-      const best = pairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
-      const price = Number(best.priceUsd);
-      if (!Number.isFinite(price)) return null;
-
-      return {
-        priceUsd: price,
-        liquidityUsd: best.liquidity?.usd ?? 0,
-        volume24hUsd: best.volume?.h24 ?? 0,
-        priceChange24h: best.priceChange?.h24 ?? null,
-        buys24h: best.txns?.h24?.buys ?? 0,
-        sells24h: best.txns?.h24?.sells ?? 0,
-        pairAddress: best.pairAddress,
-        quoteSymbol: best.quoteToken?.symbol ?? "?",
-        dex: best.dexId ?? "?",
-      };
+      return quoteFromPairs(pairs);
     },
     (v) => v !== null
   );
+}
+
+/**
+ * The same reading, for every token on the chain.
+ *
+ * One request per token, not a batch, and that is deliberate. DexScreener does
+ * accept thirty addresses in a single call — but it caps the *response* at
+ * thirty pairs regardless. Asking for thirty tokens came back covering
+ * seventeen of them, each with a truncated pool list, which is worse than
+ * making more requests: the totals would have looked complete and been short,
+ * with nothing in the response to say so.
+ *
+ * Six at a time. Ninety-five tokens against a keyless public endpoint, held
+ * under its documented ceiling by the per-token cache above rather than by
+ * luck, and bounded so a snapshot rebuild cannot open ninety-five sockets.
+ */
+export async function fetchDexQuotes(addresses: string[]): Promise<Map<string, DexQuote>> {
+  const out = new Map<string, DexQuote>();
+  if (addresses.length === 0) return out;
+
+  const CONCURRENCY = 6;
+  let cursor = 0;
+
+  const workers = Array.from({ length: Math.min(CONCURRENCY, addresses.length) }, async () => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= addresses.length) return;
+      const address = addresses[i];
+      const quote = await fetchDexQuote(address).catch(() => null);
+      if (quote) out.set(address.toLowerCase(), quote);
+    }
+  });
+
+  await Promise.all(workers);
+  return out;
 }
 
 /* --------------------------------------------------------------- Charts */
