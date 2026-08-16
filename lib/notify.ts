@@ -204,6 +204,7 @@ export async function registerBotCommands(): Promise<boolean> {
     { command: "flow", description: "Live swap flow and trade sizes — /flow NVDA" },
     { command: "delegation", description: "How the autonomous tier works" },
     { command: "positions", description: "Uniswap V3 positions the agent can defend" },
+    { command: "portfolio", description: "Tokenised shares an address holds — /portfolio 0x…" },
     { command: "watch", description: "Monitor a token, or scope alerts to a wallet — /watch 0x…" },
     { command: "watches", description: "Your token watchlist, live" },
     { command: "unwatch", description: "Stop watching a token, or clear the wallet scope" },

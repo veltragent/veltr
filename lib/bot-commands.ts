@@ -444,6 +444,64 @@ export async function cmdDelegation(): Promise<string> {
   ].join("\n");
 }
 
+/**
+ * What an address holds, in tokenised shares.
+ *
+ * Reads `balanceOfUI` rather than `balanceOf`, which is the whole point: after a
+ * split the raw balance misstates the holding by exactly the size of the
+ * corporate action, and reporting that number is the failure this product
+ * exists to warn people about.
+ *
+ * No profit or loss is shown. Nothing on chain records what anyone paid, and an
+ * entry price inferred from transfers would be a guess presented as a fact.
+ */
+export async function cmdPortfolio(address: string): Promise<string> {
+  const { isAddress } = await import("viem");
+  const target = address.trim();
+
+  if (!isAddress(target)) {
+    return "Send an address: /portfolio 0x…\n\nI read the tokenised-share balances it holds, valued at both the token price and the price of the actual shares.";
+  }
+
+  const { readPortfolio } = await import("./portfolio");
+  const { usd, signedPct, shortAddress } = await import("./format");
+  const portfolio = await readPortfolio(target);
+
+  if (portfolio.holdings.length === 0) {
+    return [
+      `${shortAddress(target)} holds no stock tokens.`,
+      "",
+      `Checked all ${portfolio.tokensChecked} on the chain.`,
+    ].join("\n");
+  }
+
+  const lines = portfolio.holdings.map((h) => {
+    const premium = h.premiumPct === null ? "" : `  ${signedPct(h.premiumPct, 2)} vs share`;
+    return [
+      `${h.symbol.padEnd(7)}${usd(h.valueUsd).padStart(12)}${premium}`,
+      `  ${h.units.toLocaleString(undefined, { maximumFractionDigits: 4 })} @ ${usd(h.priceUsd)}${h.actionPending ? "   ⚠ action queued" : ""}`,
+    ].join("\n");
+  });
+
+  const tail: string[] = ["", `Total${usd(portfolio.totalValueUsd).padStart(14)}`];
+
+  if (portfolio.totalAtSharePriceUsd !== null) {
+    const gap = portfolio.totalValueUsd - portfolio.totalAtSharePriceUsd;
+    tail.push(
+      `At share prices${usd(portfolio.totalAtSharePriceUsd).padStart(4)}`,
+      "",
+      gap >= 0
+        ? `You are paying ${usd(gap)} above what these shares cost.`
+        : `You are holding ${usd(Math.abs(gap))} below what these shares cost.`
+    );
+  } else if (portfolio.premiumIsStale) {
+    // Saying nothing is better than quoting a gap against last night's close.
+    tail.push("", "Equity market is shut — no premium, the reference would be a stale close.");
+  }
+
+  return [`${shortAddress(target)}`, "", ...lines, ...tail].join("\n");
+}
+
 export async function cmdPositions(): Promise<string> {
   const key = process.env.VELTR_DELEGATOR_PRIVATE_KEY;
   if (!key) return "No delegating account is configured.";
@@ -519,6 +577,8 @@ MARKET
 CHAIN
 /chain          every token on the chain by volume
 /flow SYM       live swap flow and trade sizes
+/portfolio 0x…  tokenised shares an address holds, valued at
+                both the token price and the real share price
 /delegation     how the autonomous tier works
 
 MISSIONS
@@ -534,6 +594,7 @@ CHANGE TRACKING
 /track vercel/next.js   a repository — tells you when a commit lands
 /track https://…        a page — tells you when the words change
 /tracks                 what you are tracking
+/portfolio <address>    tokenised shares an address holds
 /untrack <target>       stop
 
 TOKEN WATCH
@@ -689,6 +750,8 @@ export async function runCommand(raw: string): Promise<CommandResult> {
         return { text: await cmdDelegation(), handled: true };
       case "/positions":
         return { text: await cmdPositions(), handled: true };
+      case "/portfolio":
+        return { text: await cmdPortfolio(arg ?? ""), handled: true };
       default:
         return { handled: false };
     }
