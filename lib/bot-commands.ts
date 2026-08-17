@@ -392,8 +392,15 @@ export async function cmdFlow(symbol: string): Promise<string> {
     codexRecentSwaps(token.address, 20),
   ]);
 
-  const sized = swaps.filter((s) => s.valueUsd !== null).map((s) => s.valueUsd!);
-  const median = sized.length ? sized.sort((a, b) => a - b)[Math.floor(sized.length / 2)] : null;
+  const sized = swaps
+    .filter((s) => s.valueUsd !== null && s.valueUsd > 0)
+    .map((s) => s.valueUsd!)
+    .sort((a, b) => a - b);
+  const median = sized.length ? sized[Math.floor(sized.length / 2)] : null;
+  const largest = sized.length ? sized[sized.length - 1] : null;
+
+  const buys = swaps.filter((s) => s.side === "buy").length;
+  const sells = swaps.filter((s) => s.side === "sell").length;
 
   return [
     `${symbol} — flow`,
@@ -408,8 +415,9 @@ export async function cmdFlow(symbol: string): Promise<string> {
         ].join("\n")
       : "Aggregate metrics unavailable.",
     "",
-    `Recent trades        ${swaps.length}`,
+    `Recent trades        ${swaps.length}${buys + sells > 0 ? `  (${buys} buy / ${sells} sell)` : ""}`,
     median !== null ? `Median trade size    ${money(median)}` : "",
+    largest !== null ? `Largest              ${money(largest)}` : "",
     "",
     "Liquidity here is aggregated across every pool, so it exceeds any single-pool figure.",
   ]
@@ -561,9 +569,242 @@ export async function cmdPositions(): Promise<string> {
   ].join("\n");
 }
 
+/* -------------------------------------------------------- Intelligence */
+
+/**
+ * The intelligence commands.
+ *
+ * Each is a thin shell over lib/intel — the reading, scoring and wording all
+ * live there so the same result can be served to the AI agent, the watch engine
+ * and the daily brief without any of them re-deriving it.
+ */
+
+export async function cmdScan(query: string): Promise<string> {
+  const { deepScan } = await import("./intel/scan");
+  const { renderScan } = await import("./intel/format");
+
+  const scan = await deepScan(query);
+  if (!scan) return `${query} is not a token I can find on this chain. Try a ticker like NVDA, or a contract address.`;
+  return renderScan(scan);
+}
+
+export async function cmdWhy(query: string): Promise<string> {
+  const { explainMove } = await import("./intel/why");
+  const { renderWhy } = await import("./intel/format");
+
+  const report = await explainMove(query);
+  if (!report) return `${query} is not a token I can find on this chain.`;
+  return renderWhy(report);
+}
+
+export async function cmdPulse(): Promise<string> {
+  const { readPulse } = await import("./intel/pulse");
+  const { renderPulse } = await import("./intel/format");
+  return renderPulse(await readPulse());
+}
+
+export async function cmdSmart(query: string): Promise<string> {
+  const { readSmartMoney } = await import("./intel/smart-money");
+  const { renderSmartMoney } = await import("./intel/format");
+
+  const token = await resolveToken(query);
+  const address = token?.address ?? (/^0x[a-fA-F0-9]{40}$/.test(query) ? query : null);
+  if (!address) return `${query} is not a token I can find on this chain.`;
+
+  return renderSmartMoney(await readSmartMoney(address, token?.symbol ?? null));
+}
+
+export async function cmdWallet(address: string): Promise<string> {
+  const { isAddress } = await import("viem");
+  if (!isAddress(address.trim())) {
+    return "Send an address: /wallet 0x…\n\nI read its age, activity, holdings and what it has been trading.";
+  }
+
+  const { readWalletIntel } = await import("./intel/wallet");
+  const { renderWallet } = await import("./intel/format");
+  return renderWallet(await readWalletIntel(address.trim()));
+}
+
+export async function cmdRelated(query: string): Promise<string> {
+  const { relatedTokens } = await import("./intel/relationships");
+  const { renderRelationship } = await import("./intel/format");
+  const { codexTopTokens } = await import("./codex");
+
+  const token = await resolveToken(query);
+  const address = token?.address ?? (/^0x[a-fA-F0-9]{40}$/.test(query) ? query : null);
+  if (!address) return `${query} is not a token I can find on this chain.`;
+
+  const { tokens } = await codexTopTokens("volume24", 12);
+  const overlaps = await relatedTokens(
+    { address, symbol: token?.symbol ?? null },
+    tokens.map((t) => ({ address: t.address, symbol: t.symbol }))
+  );
+
+  if (overlaps.length === 0) {
+    return [
+      `No wallet overlap found for ${token?.symbol ?? query}.`,
+      "",
+      "Checked the most active tokens on the chain over the readable window. Either nothing is being traded by the same addresses, or the window was too quiet to tell.",
+    ].join("\n");
+  }
+
+  return overlaps.slice(0, 2).map(renderRelationship).join("\n\n———\n\n");
+}
+
+/**
+ * Signal delivery preferences.
+ *
+ * Reads and writes the same per-user settings record /settings already owns, so
+ * there is one settings store rather than two. Off by default — a signal is an
+ * unsolicited push, and switching a new class of those on for existing users
+ * would be the wrong way to ship it.
+ */
+export async function cmdSignals(userId: string, argument: string): Promise<string> {
+  const { getSettings, updateSettings } = await import("./watch/store");
+  const { preferencesFrom, updatePreference, signalsEnabled } = await import("./intel/preferences");
+  const { SIGNAL_KINDS } = await import("./intel/signals");
+
+  const settings = await getSettings(userId);
+  const arg = argument.trim();
+
+  if (arg) {
+    const [word, ...rest] = arg.split(/\s+/);
+    const value = rest.join(" ");
+    const field =
+      word.toLowerCase() === "on" || word.toLowerCase() === "off"
+        ? "signalsEnabled"
+        : word.toLowerCase() === "confidence"
+          ? "signalMinConfidence"
+          : word.toLowerCase() === "cooldown"
+            ? "signalCooldownSec"
+            : word.toLowerCase() === "types"
+              ? "signalKinds"
+              : null;
+
+    if (!field) {
+      return [
+        "Usage:",
+        "  /signals on           start receiving signals",
+        "  /signals off          stop",
+        "  /signals confidence 70",
+        "  /signals cooldown 6h",
+        `  /signals types smart_money volume_spike   (or "all")`,
+      ].join("\n");
+    }
+
+    const raw = field === "signalsEnabled" ? word : value;
+    const result = updatePreference(field, raw);
+    if (!result.ok) return result.error;
+
+    await updateSettings(userId, result.patch as Partial<typeof settings>);
+    return `Updated. ${await cmdSignals(userId, "")}`;
+  }
+
+  const prefs = preferencesFrom(settings);
+  const on = signalsEnabled(settings);
+
+  return [
+    "VELTR SIGNALS",
+    "",
+    `Status      ${on ? "on" : "off"}`,
+    on ? `Confidence  at least ${prefs.minConfidence}%` : "",
+    on ? `Cooldown    ${Math.round(prefs.cooldownSec / 60)}m per signal per token` : "",
+    on ? `Types       ${prefs.kinds.length ? prefs.kinds.join(", ") : "all"}` : "",
+    "",
+    on
+      ? "Signals fire on the tokens you already watch. They are separate from your price thresholds — a signal is a pattern, not a level."
+      : "Turn on with /signals on. Signals fire on tokens you already watch, reporting patterns rather than levels: wallet accumulation, volume regime changes, liquidity moves, whale prints.",
+    "",
+    `Types: ${SIGNAL_KINDS.join(", ")}`,
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+}
+
+/**
+ * Chain-wide alert opt-out.
+ *
+ * Writes to the subscription record that /start already creates, so this is a
+ * preference on the existing registry rather than a second one. Deliberately
+ * does not touch personal watch alerts, signal preferences or the daily brief —
+ * a user silencing chain-wide news has not asked to stop hearing about the token
+ * they explicitly put on a watchlist.
+ */
+export async function cmdAlerts(userId: string, argument: string): Promise<string> {
+  const { mutateState, readState } = await import("./store");
+  const arg = argument.trim().toLowerCase();
+
+  const describe = async () => {
+    const state = await readState();
+    const mine = state.subscriptions.find((s) => s.destination === userId);
+    if (!mine) return "You are not subscribed. Send /start first.";
+
+    const on = mine.globalAlerts !== false;
+    return [
+      "VELTR ALERTS",
+      "",
+      `Chain-wide alerts  ${on ? "ON" : "OFF"}`,
+      "",
+      on
+        ? "You will hear from Veltr when something genuinely unusual happens on Robinhood Chain — smart-money accumulation, a volume or liquidity event, a whale print, or a security finding."
+        : "Chain-wide alerts are off. Your token watches and their alerts are unaffected.",
+      "",
+      "These are rare by design: high confidence only, one token at a time, with a cooling-off period so the same event is never sent twice.",
+      "",
+      on ? "/alerts off to stop." : "/alerts on to resume.",
+      "",
+      "Separate from /watch (your own tokens) and /signals (per-token patterns).",
+    ].join("\n");
+  };
+
+  if (arg === "on" || arg === "off") {
+    const enabled = arg === "on";
+    const found = await mutateState((state) => {
+      const exists = state.subscriptions.some((s) => s.destination === userId);
+      if (!exists) return { state, result: false };
+
+      return {
+        state: {
+          ...state,
+          subscriptions: state.subscriptions.map((s) =>
+            s.destination === userId
+              ? // Re-enabling also clears an unreachable mark: they are plainly reachable.
+                { ...s, globalAlerts: enabled, undeliverableSince: enabled ? null : s.undeliverableSince }
+              : s
+          ),
+        },
+        result: true,
+      };
+    });
+
+    if (!found) return "You are not subscribed. Send /start first.";
+    return `${enabled ? "Chain-wide alerts on." : "Chain-wide alerts off."}\n\n${await describe()}`;
+  }
+
+  if (arg && arg !== "status") {
+    return "Usage: /alerts on, /alerts off, or /alerts status";
+  }
+
+  return describe();
+}
+
 /* --------------------------------------------------------------- Router */
 
 export const BOT_HELP = `Veltr — market terminal for Robinhood Chain.
+
+INTELLIGENCE
+/scan SYM       full read — price, depth, holders, flow, and
+                six scores with the confidence behind each
+/why SYM        what is moving it, separating what is measured
+                from what is only consistent with the data
+/pulse          the whole chain: momentum, movers, anomalies
+/smart SYM      wallets accumulating or distributing right now
+/wallet 0x…     an address: age, holdings, concentration, flow
+/related SYM    tokens being traded by the same wallets
+/signals        automatic alerts when a pattern appears on a
+                token you watch — on, off, and your thresholds
+/alerts         chain-wide alerts from Veltr, on by default —
+                /alerts off to stop, /alerts status to check
 
 MARKET
 /price SYM      exchange price, on-chain price, premium
@@ -693,8 +934,17 @@ I do not report an action as done until a second, independent read confirms it. 
 
 Anything consequential asks you first. Every time, with no override.
 
+ALERTS ARE ON
+
+Important Robinhood Chain alerts are enabled by default — smart-money accumulation, unusual volume or liquidity, whale prints, security findings. They are rare on purpose: high confidence only, with a cooling-off period so nothing repeats.
+
+   /alerts off   stop them
+   /alerts       check the setting
+
 START HERE
 
+   /scan NVDA    the full read on one token
+   /pulse        the whole chain right now
    /market       what the whole market looks like now
    /price NVDA   one name, both prices, the gap between them
    /watch 0x…    monitor a token
@@ -710,7 +960,7 @@ export type CommandResult =
  * Resolves a slash command. Anything unrecognised falls through to the agent,
  * so the bot answers plain questions rather than rejecting them.
  */
-export async function runCommand(raw: string): Promise<CommandResult> {
+export async function runCommand(raw: string, userId?: string): Promise<CommandResult> {
   const text = raw.trim();
   if (!text.startsWith("/")) return { handled: false };
 
@@ -751,6 +1001,34 @@ export async function runCommand(raw: string): Promise<CommandResult> {
         return { text: await cmdPositions(), handled: true };
       case "/portfolio":
         return { text: await cmdPortfolio(arg ?? ""), handled: true };
+      case "/scan":
+        return { text: arg ? await cmdScan(arg) : needsSymbol("/scan"), handled: true };
+      case "/why":
+        return { text: arg ? await cmdWhy(arg) : needsSymbol("/why"), handled: true };
+      case "/pulse":
+        return { text: await cmdPulse(), handled: true };
+      case "/smart":
+        return { text: arg ? await cmdSmart(arg) : needsSymbol("/smart"), handled: true };
+      case "/related":
+        return { text: arg ? await cmdRelated(arg) : needsSymbol("/related"), handled: true };
+      case "/wallet":
+        // Addresses are case-sensitive in display; `arg` has been upper-cased.
+        return { text: await cmdWallet(rest.join(" ").trim()), handled: true };
+      case "/alerts":
+        return {
+          text: userId
+            ? await cmdAlerts(userId, rest.join(" ").trim())
+            : "Alert preferences are per-user — send this from a chat.",
+          handled: true,
+        };
+      case "/signals":
+        // Preferences are per-user, so without a chat id there is nothing to read.
+        return {
+          text: userId
+            ? await cmdSignals(userId, rest.join(" ").trim())
+            : "Signal preferences are per-user — send this from a chat.",
+          handled: true,
+        };
       default:
         return { handled: false };
     }

@@ -21,7 +21,16 @@ import { INSTANCE_ID } from "./lease";
  * website on a different host, can tell the agent has stopped checking in.
  */
 
-export type LoopName = "telegram" | "watch" | "tokens" | "tracks" | "schedules" | "backups";
+export type LoopName =
+  | "telegram"
+  | "watch"
+  | "tokens"
+  | "tracks"
+  | "schedules"
+  | "backups"
+  | "intel"
+  | "signals"
+  | "broadcast";
 
 /**
  * How long a loop may go quiet before it is considered stuck.
@@ -37,6 +46,12 @@ const TOLERANCE_MS: Record<LoopName, number> = {
   tracks: 20 * 60_000,
   schedules: 20 * 60_000,
   backups: 90 * 60_000,
+  // Three times its ten-minute period: a slow ranked-listing read must not alarm.
+  intel: 30 * 60_000,
+  // Three times its five-minute period.
+  signals: 15 * 60_000,
+  // Three times its fifteen-minute sweep.
+  broadcast: 45 * 60_000,
 };
 
 const beats = new Map<LoopName, number>();

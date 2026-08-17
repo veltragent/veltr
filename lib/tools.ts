@@ -11,6 +11,7 @@ import { chartImageUrl } from "./bot-commands";
 import { readState, writeState } from "./store";
 import { sendPhoto } from "./notify";
 import { EXTENDED_TOOLS } from "./tools-extended";
+import { INTEL_TOOLS } from "./tools-intel";
 
 /**
  * Tools the agent may call.
@@ -481,7 +482,7 @@ export const TOOLS: ToolSpec[] = [
 
 // Extended tools live in their own module so the core set stays readable; they
 // are merged here so callers see one registry.
-const ALL_TOOLS: ToolSpec[] = [...TOOLS, ...EXTENDED_TOOLS];
+const ALL_TOOLS: ToolSpec[] = [...TOOLS, ...EXTENDED_TOOLS, ...INTEL_TOOLS];
 
 const BY_NAME = new Map(ALL_TOOLS.map((t) => [t.name, t]));
 

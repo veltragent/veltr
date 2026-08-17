@@ -238,6 +238,34 @@ export function normaliseSettings(stored: unknown): WatchSettings {
   if (typeof raw.useDexScreener === "boolean") out.useDexScreener = raw.useDexScreener;
   if (typeof raw.useGeckoTerminal === "boolean") out.useGeckoTerminal = raw.useGeckoTerminal;
 
+  /*
+   * Signal preferences ride along on this object.
+   *
+   * They must be copied explicitly because this function rebuilds settings from
+   * the defaults rather than merging into the stored record — which is the right
+   * behaviour for thresholds, and would silently erase every one of these on the
+   * first read after they were set. Validation lives in intel/preferences.ts;
+   * this only preserves what is already the right type.
+   */
+  const extra = stored as Record<string, unknown> | null;
+  const withSignals = out as typeof out & {
+    signalsEnabled?: boolean;
+    signalMinConfidence?: number;
+    signalKinds?: string[];
+    signalCooldownSec?: number;
+  };
+
+  if (typeof extra?.signalsEnabled === "boolean") withSignals.signalsEnabled = extra.signalsEnabled;
+  if (typeof extra?.signalMinConfidence === "number" && Number.isFinite(extra.signalMinConfidence)) {
+    withSignals.signalMinConfidence = extra.signalMinConfidence;
+  }
+  if (typeof extra?.signalCooldownSec === "number" && Number.isFinite(extra.signalCooldownSec)) {
+    withSignals.signalCooldownSec = extra.signalCooldownSec;
+  }
+  if (Array.isArray(extra?.signalKinds)) {
+    withSignals.signalKinds = extra.signalKinds.filter((k): k is string => typeof k === "string");
+  }
+
   // Both sources off would silently stop every alert. Treat it as a mistake and
   // restore the primary source rather than leaving a watchlist that never fires.
   if (!out.useDexScreener && !out.useGeckoTerminal) out.useDexScreener = true;

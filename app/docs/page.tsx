@@ -203,8 +203,35 @@ export default function DocsPage() {
                   cmd: "/portfolio 0x…",
                   body: "Tokenised shares an address holds, valued at both the token price and the real share price. Reads the effective balance, so it stays correct after a split.",
                 },
+                {
+                  cmd: "/scan SYM",
+                  body: "The full read on one token: depth, holders, concentration, flow, contract security and six scores, each carrying the share of its inputs that had data behind it.",
+                },
+                {
+                  cmd: "/why SYM",
+                  body: "What is moving it — separating what was measured from what is a statistical signal from what is merely consistent with the data.",
+                },
+                { cmd: "/pulse", body: "The whole chain: breadth momentum, movers filtered to real depth, and anything behaving unusually against its own history." },
+                {
+                  cmd: "/smart SYM",
+                  body: "Wallets accumulating or distributing right now, ranked on size, conviction and repetition. Current behaviour, not track record — see the limits below.",
+                },
+                { cmd: "/wallet 0x…", body: "An address: age, activity, holdings, concentration, and buy/sell flow over the trades that were visible." },
+                { cmd: "/related SYM", body: "Tokens being traded by the same wallets. Overlap only — it establishes no common ownership." },
               ]}
             />
+            <p>
+              Two limits worth stating plainly. Wallet <em>track record</em> is not available on this
+              chain: the trade feed reaches hours rather than months, so Veltr reports how a wallet is
+              behaving now and never claims it has been right before. And nothing on chain records
+              what an address paid, so profit and loss is not computed — only the buy and sell flow
+              that was actually visible, labelled as covering exactly that.
+            </p>
+            <p>
+              Contract security comes from GoPlus, which supports this chain but answers 21 of its 36
+              checks here. The 15 it omits include honeypot, mintable and pausable. Those are reported
+              as <em>not checked</em> rather than left out, because a missing warning reads as a pass.
+            </p>
           </Section>
 
           <Section id="watch" eyebrow="05 · Alerts" title="Told once, when it happens">
@@ -224,10 +251,18 @@ export default function DocsPage() {
                 { cmd: "/watches", body: "Your watchlist, priced live." },
                 { cmd: "/unwatch 0x…", body: "Stop watching that token." },
                 { cmd: "/settings", body: "Thresholds, check interval, cooldown and which price sources to use." },
+                { cmd: "/signals", body: "Pattern alerts on tokens you watch — accumulation, volume regime changes, whale prints. Off until you turn them on." },
+                { cmd: "/alerts", body: "Chain-wide alerts from Veltr. On by default; /alerts off stops them without touching your watches." },
                 { cmd: "/status", body: "What Veltr is seeing right now." },
                 { cmd: "/stop", body: "Unsubscribe from everything." },
               ]}
             />
+            <p>
+              Chain-wide alerts are separate from your watchlist and deliberately rare. A watch fires
+              at whatever threshold you set; a chain-wide alert has to clear a much higher bar —
+              strong, well-evidenced, and unusual against the token&rsquo;s own recorded history —
+              then wait out a cooling-off period so one event is never described three times.
+            </p>
             <p>
               Premium alerts are the ones unique to this chain: they fire when a token drifts away
               from the share it represents. They stay silent while the equity market is shut, because

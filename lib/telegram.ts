@@ -389,7 +389,7 @@ A step already in flight will finish — an HTTP call cannot be recalled — but
     }
 
     const command = await withActivity(chatId, isChart ? "upload_photo" : "typing", () =>
-      runCommand(raw)
+      runCommand(raw, chatId)
     );
 
     if (command.handled) {
@@ -641,6 +641,18 @@ A step already in flight will finish — an HTTP call cannot be recalled — but
     }
 
     const alreadySubscribed = subscriptions.some((s) => s.destination === chatId);
+
+    /*
+     * They are demonstrably reachable, so any "unreachable" mark is stale.
+     *
+     * Without this, a user who blocked the bot and later unblocked it would stay
+     * silently excluded from chain-wide alerts forever — the mark is only ever
+     * set by a failed broadcast, and nothing else would clear it.
+     */
+    if (alreadySubscribed) {
+      const { clearUndeliverable } = await import("./intel/broadcast");
+      void clearUndeliverable(chatId).catch(() => {});
+    }
 
     // An unrecognised slash command is a typo, not a question. Sending "/prcie"
     // to the language model would produce a confident guess; the command list

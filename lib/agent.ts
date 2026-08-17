@@ -107,21 +107,59 @@ const BRIEF_SYSTEM = `${SYSTEM}
 You are writing the daily brief for holders of stock tokens on Robinhood Chain.
 Open with what a holder must do today, if anything. Then the state of the chain.
 Be specific and quantitative. No preamble, no sign-off, no markdown headers.
+
+You will be given two kinds of material and must not blur them:
+- MEASURED figures, which you may state directly.
+- SIGNALS, which are departures from a token's own recorded history. Report these
+  as observations ("volume is well above its own norm"), never as causes.
+You may not state why anything happened unless the evidence says so. Where the
+data is thin, say it is thin. Never invent a ticker, figure or explanation.
+
 Under 250 words.`;
 
 /**
  * The daily brief runs once per day and is broadcast to every subscriber, so it
  * is the one place where paying for the stronger model is justified.
+ *
+ * Upgraded rather than replaced: the corporate-action evidence that was here
+ * originally is still the opening, because a queued multiplier change is the
+ * one thing on this chain a holder must act on. Market intelligence is appended
+ * beneath it, and is skipped silently when unavailable so a provider outage
+ * degrades the brief instead of stopping it.
  */
 export async function runDailyBrief(snapshot: RadarSnapshot) {
   const evidence = buildEvidence(snapshot);
+  const market = await marketEvidence();
+
   const result = await complete(
     "deep",
     BRIEF_SYSTEM,
-    `${evidence}\n\nWrite today's brief.`,
-    600
+    `${evidence}${market ? `\n\n${market}` : ""}\n\nWrite today's brief.`,
+    700
   );
 
   if (result) return { brief: result.text, source: result.model };
-  return { brief: deterministicBriefing(snapshot), source: "deterministic" };
+  return { brief: `${deterministicBriefing(snapshot)}${market ? `\n\n${market}` : ""}`, source: "deterministic" };
+}
+
+/**
+ * The market half of the brief's evidence.
+ *
+ * Reuses the pulse read the /pulse command already builds — same cache, same
+ * figures, so the brief and the command can never disagree. Returns null rather
+ * than throwing: the brief must still go out when a provider is down.
+ */
+async function marketEvidence(): Promise<string | null> {
+  try {
+    const { readPulse, pulseEvidence } = await import("./intel/pulse");
+    const pulse = await readPulse();
+
+    // A pulse with nothing in it is worse than no section at all.
+    if (pulse.gainers.length === 0 && pulse.anomalous.length === 0 && pulse.totalVolume24Usd === null) {
+      return null;
+    }
+    return `MARKET INTELLIGENCE (measured readings; the ANOMALIES block is signal, not cause)\n${pulseEvidence(pulse)}`;
+  } catch {
+    return null;
+  }
 }

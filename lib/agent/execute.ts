@@ -139,5 +139,8 @@ export async function registryRunner(chatId?: string | null): Promise<ToolRunner
 export async function declaredActions(): Promise<Set<string>> {
   const { TOOLS } = await import("../tools");
   const { EXTENDED_TOOLS } = await import("../tools-extended");
-  return new Set([...TOOLS, ...EXTENDED_TOOLS].filter((t) => t.acts).map((t) => t.name));
+  const { INTEL_TOOLS } = await import("../tools-intel");
+  return new Set(
+    [...TOOLS, ...EXTENDED_TOOLS, ...INTEL_TOOLS].filter((t) => t.acts).map((t) => t.name)
+  );
 }

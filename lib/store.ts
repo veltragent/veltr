@@ -6,6 +6,7 @@ import type { Mission } from "./agent/types";
 import type { Track } from "./track/store";
 import type { Lease } from "./lease";
 import type { Schedule } from "./agent/schedule";
+import type { Series as TokenSeries } from "./intel/baseline";
 
 /**
  * File-backed state for the watcher.
@@ -30,6 +31,27 @@ export type Subscription = {
   /** Only notify when |deltaPct| meets this threshold. */
   minDeltaPct: number;
   createdAt: string;
+  /**
+   * Whether this user receives Veltr's chain-wide intelligence alerts.
+   *
+   * Undefined means on. Written that way deliberately: every subscriber who
+   * existed before this feature should receive them without a migration, and
+   * treating absence as opt-out would have silently excluded exactly the people
+   * who have been using the bot longest.
+   *
+   * These are separate from personal watch alerts and from the daily brief.
+   * Turning them off must not touch either.
+   */
+  globalAlerts?: boolean;
+  /**
+   * Set when Telegram says this chat can no longer be written to.
+   *
+   * A blocked bot or a deleted account returns 403 forever, so retrying is a
+   * guaranteed-failing request on every broadcast. Recorded rather than deleted:
+   * the row is what proves they once subscribed, and a user who unblocks the bot
+   * is cleared on their next message.
+   */
+  undeliverableSince?: string | null;
 };
 
 export type DetectedChange = {
@@ -108,6 +130,33 @@ export type WatcherState = {
    * silent unless the figures they observe actually move.
    */
   schedules: Schedule[];
+  /**
+   * Rolling metric history per token, recorded by the intelligence loop.
+   *
+   * Kept here because no provider on this chain sells it: there is no endpoint
+   * for last week's liquidity or holder count, so "is this unusual" can only be
+   * answered against observations we made ourselves. Bounded per token — see
+   * lib/intel/baseline.ts — so this stays state rather than becoming an archive.
+   */
+  intelBaselines: Record<string, TokenSeries>;
+  /**
+   * When each signal kind last fired, per user and per token.
+   *
+   * Separate from the watch cooldown because a signal is not a threshold
+   * crossing: the same accumulation can stay true for hours, and re-arming on a
+   * value retreating does not apply to it. Keyed so one user's silence never
+   * suppresses another's alert.
+   */
+  signalCooldowns: Record<string, number>;
+  /**
+   * What has already gone out chain-wide, and when.
+   *
+   * Holds two kinds of mark: one per broadcast event identity, which makes a
+   * re-detection of the same event a no-op, and one per token, which enforces
+   * quiet between alerts about the same thing. Bounded on write — see
+   * lib/intel/broadcast.ts.
+   */
+  broadcastMarks: Record<string, number>;
 };
 
 const EMPTY: WatcherState = {
@@ -127,6 +176,9 @@ const EMPTY: WatcherState = {
   tracks: [],
   leases: {},
   schedules: [],
+  intelBaselines: {},
+  signalCooldowns: {},
+  broadcastMarks: {},
 };
 
 let memo: WatcherState | null = null;

@@ -108,6 +108,75 @@ export async function sendTelegram(
   }
 }
 
+export type DeliveryOutcome =
+  | { ok: true }
+  /** Retrying will never work: blocked, deactivated, or the chat is gone. */
+  | { ok: false; permanent: true; reason: string }
+  /** Transient — rate limit, timeout, or a server error. */
+  | { ok: false; permanent: false; retryAfterSec: number | null; reason: string };
+
+/**
+ * Send, distinguishing a user who is gone from one who is briefly unreachable.
+ *
+ * `sendTelegram` returns a bare boolean, which is right for a reply to someone
+ * who just spoke — they are demonstrably there. A broadcast cannot use it: a
+ * blocked bot returns 403 forever, and retrying it on every broadcast is a
+ * permanently failing request per user per cycle, growing with the number of
+ * people who ever left.
+ *
+ * So this reports which kind of failure it was, and the broadcaster records the
+ * permanent ones instead of asking again.
+ */
+export async function deliver(chatId: string, text: string): Promise<DeliveryOutcome> {
+  const token = process.env.VELTR_TELEGRAM_BOT_TOKEN;
+  if (!token) return { ok: false, permanent: false, retryAfterSec: null, reason: "no bot token" };
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
+      signal: AbortSignal.timeout(20_000),
+    });
+
+    if (res.ok) return { ok: true };
+
+    const body = (await res.json().catch(() => ({}))) as {
+      description?: string;
+      parameters?: { retry_after?: number };
+    };
+    const description = body.description ?? `HTTP ${res.status}`;
+
+    /*
+     * 403 is the blocked/deactivated case. 400 "chat not found" is the same
+     * thing for a chat that no longer exists — both are matched on the text
+     * because Telegram reuses 400 for ordinary bad requests too, and treating
+     * every 400 as permanent would quietly drop users over a formatting bug.
+     */
+    if (res.status === 403 || /bot was blocked|user is deactivated|chat not found|bot was kicked/i.test(description)) {
+      return { ok: false, permanent: true, reason: description };
+    }
+
+    if (res.status === 429) {
+      return {
+        ok: false,
+        permanent: false,
+        retryAfterSec: body.parameters?.retry_after ?? 30,
+        reason: description,
+      };
+    }
+
+    return { ok: false, permanent: false, retryAfterSec: null, reason: description };
+  } catch (error) {
+    return {
+      ok: false,
+      permanent: false,
+      retryAfterSec: null,
+      reason: error instanceof Error ? error.message : "send failed",
+    };
+  }
+}
+
 /**
  * Reacts to a message.
  *
@@ -193,6 +262,14 @@ export async function registerBotCommands(): Promise<boolean> {
   if (!token) return false;
 
   const commands = [
+    { command: "scan", description: "Full intelligence read on a token — /scan NVDA" },
+    { command: "why", description: "What is actually moving a token — /why NVDA" },
+    { command: "pulse", description: "Whole-chain read: momentum, movers, anomalies" },
+    { command: "smart", description: "Wallets accumulating or distributing — /smart NVDA" },
+    { command: "wallet", description: "Read an address: age, holdings, flow — /wallet 0x…" },
+    { command: "related", description: "Tokens traded by the same wallets — /related NVDA" },
+    { command: "signals", description: "Automatic intelligence alerts on tokens you watch" },
+    { command: "alerts", description: "Chain-wide Veltr alerts — on by default, /alerts off to stop" },
     { command: "price", description: "Stock price, token price and premium — /price NVDA" },
     { command: "chart", description: "Price chart from the deepest pool — /chart NVDA" },
     { command: "premium", description: "Premium table across tokenised stocks" },

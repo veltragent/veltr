@@ -5,6 +5,9 @@ import { readState } from "./store";
 import { runWatchCycleSafely } from "./watch/engine";
 import { runTrackCycleSafely } from "./track/engine";
 import { runScheduleCycleSafely } from "./agent/schedule-engine";
+import { recordBaselineSafely, RECORD_INTERVAL_MS } from "./intel/recorder";
+import { runSignalCycleSafely, SIGNAL_INTERVAL_MS } from "./intel/watch-signals";
+import { runBroadcastCycleSafely, BROADCAST_INTERVAL_MS } from "./intel/broadcast-cycle";
 import { MIN_INTERVAL_SEC } from "./watch/settings";
 import { acquireLease, keepLease, leaseHolder, INSTANCE_ID } from "./lease";
 import { kvAvailable } from "./kv";
@@ -153,6 +156,73 @@ async function trackLoop() {
     beat("tracks");
     if (report && (report.changed > 0 || report.failed > 0)) {
       log(`[TRACK] due=${report.due} fetched=${report.fetched} changed=${report.changed} sent=${report.sent} failed=${report.failed}${report.paused ? ` paused=${report.paused}` : ""}`);
+    }
+  }
+}
+
+/**
+ * Records market readings so anomalies have something to be anomalous against.
+ *
+ * Separate from the token watcher because it serves every token rather than the
+ * watched ones, and runs far slower: this is building a distribution, not
+ * chasing a threshold.
+ */
+async function intelLoop() {
+  log(`intel recorder started — every ${RECORD_INTERVAL_MS / 60_000}m`);
+  watchLoopHealth("intel");
+
+  for (;;) {
+    const report = await recordBaselineSafely();
+    beat("intel");
+    if (report) {
+      log(`[INTEL] recorded ${report.tokens} tokens${report.fromWatchlists ? ` (+${report.fromWatchlists} watched)` : ""}`);
+    }
+    await new Promise((r) => setTimeout(r, RECORD_INTERVAL_MS));
+  }
+}
+
+/**
+ * Signal evaluation for watched tokens.
+ *
+ * Beside the threshold watcher rather than inside it: that cycle is synchronous
+ * and pure by design, and signals need provider reads. Runs far slower because
+ * accumulation and regime changes do not appear and vanish inside a minute.
+ */
+async function signalLoop() {
+  log(`signal engine started — every ${SIGNAL_INTERVAL_MS / 60_000}m`);
+  watchLoopHealth("signals");
+
+  for (;;) {
+    await new Promise((r) => setTimeout(r, SIGNAL_INTERVAL_MS));
+    const report = await runSignalCycleSafely();
+    beat("signals");
+    if (report && (report.delivered > 0 || report.signalsFound > 0)) {
+      log(
+        `[SIGNAL] tokens=${report.tokensEvaluated} found=${report.signalsFound} sent=${report.delivered} suppressed=${report.suppressed} failed=${report.failed}`
+      );
+    }
+  }
+}
+
+/**
+ * Chain-wide alerts.
+ *
+ * The only loop that writes to every subscriber, so it runs slowest and gates
+ * hardest — see intel/broadcast.ts for the thresholds and why they sit far above
+ * the personal ones.
+ */
+async function broadcastLoop() {
+  log(`global alerts started — sweep every ${BROADCAST_INTERVAL_MS / 60_000}m`);
+  watchLoopHealth("broadcast");
+
+  for (;;) {
+    await new Promise((r) => setTimeout(r, BROADCAST_INTERVAL_MS));
+    const report = await runBroadcastCycleSafely();
+    beat("broadcast");
+    if (report && (report.broadcast > 0 || report.eligible > 0)) {
+      log(
+        `[BROADCAST] candidates=${report.candidates} signals=${report.signalsFound} eligible=${report.eligible} sent=${report.broadcast} recipients=${report.recipients} delivered=${report.sent} removed=${report.removed}`
+      );
     }
   }
 }
@@ -384,6 +454,9 @@ export async function startScheduler(): Promise<void> {
   void tokenWatchLoop();
   void trackLoop();
   void scheduleLoop();
+  void intelLoop();
+  void signalLoop();
+  void broadcastLoop();
   void briefLoop();
   void backupLoop();
   void watchdogLoop();
