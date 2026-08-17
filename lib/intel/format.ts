@@ -325,8 +325,20 @@ export function renderRelationship(o: Overlap): string {
 
 /* ------------------------------------------------------------ Signal */
 
-export function renderSignal(s: Signal): string {
-  return [
+/**
+ * Renders a signal for delivery.
+ *
+ * `unsolicited` is not cosmetic. A signal reaching someone through /signals was
+ * asked for — they turned it on for a token they chose, and telling them how to
+ * stop it every time would be nagging. A chain-wide alert was never asked for:
+ * it arrives because they once ran /start, possibly months ago, and the sentence
+ * explaining that lives in a message they will never see again.
+ *
+ * So an unsolicited push carries its own way out. Anything else leaves a person
+ * with a buzzing phone and no way to know it can be stopped short of guessing.
+ */
+export function renderSignal(s: Signal, options: { unsolicited?: boolean } = {}): string {
+  const lines = [
     `🔥 VELTR SIGNAL`,
     "",
     `${s.symbol ? `$${s.symbol}` : s.address.slice(0, 10)}`,
@@ -338,5 +350,15 @@ export function renderSignal(s: Signal): string {
     ...s.facts.map((f) => `  ${f}`),
     "",
     `/scan ${s.symbol ?? s.address} for the full read.`,
-  ].join("\n");
+  ];
+
+  if (options.unsolicited) {
+    lines.push(
+      "",
+      "You are getting this because Veltr watches the whole chain for everyone. It only speaks when something is unusual and well evidenced.",
+      "/alerts off to stop these. Your own watches are unaffected."
+    );
+  }
+
+  return lines.join("\n");
 }

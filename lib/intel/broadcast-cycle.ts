@@ -135,7 +135,9 @@ export async function runBroadcastCycle(deps: BroadcastCycleDeps): Promise<Broad
 
   for (const signal of pending) {
     report.broadcast++;
-    const outcome = await deps.send(recipients, renderSignal(signal));
+    // Unsolicited: the recipient never named this token, so the message has to
+    // say why it arrived and how to stop it.
+    const outcome = await deps.send(recipients, renderSignal(signal, { unsolicited: true }));
     report.sent += outcome.sent;
     report.removed += outcome.removed;
   }

@@ -346,3 +346,29 @@ test("a burst of signals is capped per cycle", async () => {
   assert.ok(report.eligible >= 10);
   assert.ok(report.broadcast <= 2, `a market-wide move must not send ten alerts, sent ${report.broadcast}`);
 });
+
+/* --------------------------------------------- Unsolicited push carries its exit */
+
+test("a chain-wide alert says why it arrived and how to stop it", async () => {
+  const { renderSignal } = await import("../lib/intel/format");
+  const text = renderSignal(signal(), { unsolicited: true });
+
+  assert.match(text, /\/alerts off/, "an unsolicited push must carry its own opt-out");
+  assert.match(text, /whole chain/i, "and explain why it arrived");
+  assert.match(text, /own watches are unaffected/i, "and make clear what it does not turn off");
+});
+
+test("a signal the user asked for does not nag them about turning it off", async () => {
+  const { renderSignal } = await import("../lib/intel/format");
+  const asked = renderSignal(signal());
+
+  assert.doesNotMatch(asked, /\/alerts off/, "they enabled /signals for this token themselves");
+});
+
+test("the broadcast path sends the unsolicited variant", async () => {
+  const h = cycleDeps();
+  await runBroadcastCycle(h.deps);
+
+  assert.equal(h.sent.length, 1);
+  assert.match(h.sent[0], /\/alerts off/, "the wiring, not just the renderer, must pass the flag");
+});
