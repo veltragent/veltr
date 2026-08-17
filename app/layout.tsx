@@ -47,6 +47,24 @@ export const metadata: Metadata = {
       "Your balance is fixed. Your ownership is not. An autonomous analyst for Robinhood Chain that never reports a number it did not fetch.",
   },
   applicationName: "Veltr Agent",
+  /**
+   * Ownership proof for Virtuals Protocol.
+   *
+   * Goes through `verification.other` rather than a hand-written <meta> in the
+   * layout's JSX: Next owns the contents of <head> here, and a tag placed
+   * outside the Metadata API is the kind of thing a later refactor silently
+   * drops — at which point the listing quietly fails re-verification with
+   * nothing in the diff to explain why.
+   *
+   * The value is a public proof of control, not a credential. It grants
+   * nothing, so it belongs in the repository where it stays with the site it
+   * verifies rather than in an environment variable nobody remembers setting.
+   */
+  verification: {
+    other: {
+      "virtual-protocol-site-verification": "3a0a1c8466879ba109c494f4473bdc3e",
+    },
+  },
 };
 
 /**
